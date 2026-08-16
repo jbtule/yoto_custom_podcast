@@ -3,14 +3,27 @@ Thin wrapper around the bits of the Yoto API this tool needs:
 audio upload + transcode, and card (content) creation.
 
 Docs: https://yoto.dev/api/
+
+Set YOTO_DEBUG=1 to print raw request/response bodies for every call --
+useful for confirming/fixing the exact response shapes, since some of
+these were implemented from documentation summaries rather than a live
+account.
 """
 from __future__ import annotations
 
+import json
+import os
 import time
 
 import requests
 
 API_BASE = "https://api.yotoplay.com"
+DEBUG = os.environ.get("YOTO_DEBUG") == "1"
+
+
+def _debug(label: str, obj):
+    if DEBUG:
+        print(f"    [debug] {label}: {json.dumps(obj, indent=2)[:2000]}")
 
 
 class YotoClient:
@@ -29,7 +42,9 @@ class YotoClient:
             headers={"Accept": "application/json"},
         )
         resp.raise_for_status()
-        upload = resp.json()["upload"] if "upload" in resp.json() else resp.json()
+        resp_body = resp.json()
+        _debug("uploadUrl response", resp_body)
+        upload = resp_body["upload"] if "upload" in resp_body else resp_body
         upload_url = upload["uploadUrl"]
         upload_id = upload["uploadId"]
 
@@ -48,7 +63,8 @@ class YotoClient:
             if on_progress:
                 on_progress("already on Yoto's servers (dedup by checksum)")
 
-        for _ in range(120):
+        last_body = None
+        for attempt in range(120):
             poll = self.session.get(
                 f"{API_BASE}/media/upload/{upload_id}/transcoded",
                 params={"loudnorm": "false"},
@@ -56,17 +72,31 @@ class YotoClient:
             )
             poll.raise_for_status()
             body = poll.json()
+            last_body = body
+            if attempt == 0 or DEBUG:
+                _debug(f"transcode poll #{attempt}", body)
             info = body.get("transcode") or body
             if info.get("transcodedSha256"):
                 return info
+            if on_progress and attempt % 10 == 0 and attempt > 0:
+                on_progress(f"still transcoding... ({attempt}s)")
             time.sleep(1)
 
-        raise TimeoutError(f"Transcoding did not finish for {file_path}")
+        raise TimeoutError(
+            f"Transcoding did not finish for {file_path}.\n"
+            f"Last poll response: {json.dumps(last_body, indent=2)}\n"
+            f"Re-run with YOTO_DEBUG=1 for the full request/response trail."
+        )
 
     def create_or_update_content(self, content: dict) -> dict:
+        _debug("createOrUpdateContent request", content)
         resp = self.session.post(f"{API_BASE}/content", json=content)
+        if not resp.ok:
+            _debug(f"createOrUpdateContent error {resp.status_code}", resp.text[:2000])
         resp.raise_for_status()
-        return resp.json()
+        body = resp.json()
+        _debug("createOrUpdateContent response", body)
+        return body
 
     def upload_icon(self, png_path: str, filename: str) -> str:
         """Upload a 16x16 PNG icon. Returns the mediaId to reference as
@@ -81,5 +111,6 @@ class YotoClient:
         )
         resp.raise_for_status()
         body = resp.json()
+        _debug("upload_icon response", body)
         icon = body.get("displayIcon", body)
         return icon["mediaId"]
