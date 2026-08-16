@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 """
-Build custom Yoto-friendly RSS feeds for The Titans of All'Terra, Season 1.
+Build custom Yoto-friendly RSS feeds for The Titans of All'Terra.
 
 Why this exists
 ----------------
 Yoto's "custom RSS" card only ever loads the most recent 25 items from a
-feed, and plays them back newest-first. Season 1 of the source podcast has
-36 full episodes and is riddled with non-episode bonus tracks (cast intros,
-autopsies, Kickstarter plugs, etc). This script:
+feed, and plays them back newest-first. Every season of the source podcast
+mixes story episodes with non-episode bonus tracks (cast intros, autopsies,
+Kickstarter plugs, etc), and several seasons have more than 25 story
+episodes. This script:
 
   1. Downloads the real feed.
-  2. Filters down to Season 1, itunes:episodeType == "full" only.
-  3. Splits the 36 episodes into two <=25-item feeds (Part 1: Ep 1-18,
-     Part 2: Ep 19-36) so both fit Yoto's limit with headroom.
+  2. Filters down to a given season, itunes:episodeType == "full" only.
+  3. Splits each season into <=25-item feed "parts" so they fit Yoto's
+     limit with headroom (see SEASONS below for the exact split per
+     season).
   4. Re-writes each item's <pubDate> so that, when Yoto sorts newest-first,
-     playback order comes out as Episode 1 -> Episode 18 (and 19 -> 36)
-     i.e. the correct in-story order. The *first* episode of a part gets
-     the newest fake date; later episodes get progressively older dates.
+     playback order comes out as Episode 1 -> N in-story order within each
+     part. The *first* episode of a part gets the newest fake date; later
+     episodes get progressively older dates.
 
 The original enclosure URLs (actual audio files) and guids are preserved
 unchanged -- only channel/item metadata needed for ordering and filtering
@@ -45,10 +47,17 @@ NS = {
 for prefix, uri in NS.items():
     ET.register_namespace(prefix, uri)
 
-PARTS = [
-    ("season1-part1.xml", "Season 1, Part 1 (Episodes 1-18)", 1, 18),
-    ("season1-part2.xml", "Season 1, Part 2 (Episodes 19-36)", 19, 36),
-]
+# season -> list of (filename, label, first_episode, last_episode)
+SEASONS: dict[int, list[tuple[str, str, int, int]]] = {
+    1: [
+        ("season1-part1.xml", "Season 1, Part 1 (Episodes 1-18)", 1, 18),
+        ("season1-part2.xml", "Season 1, Part 2 (Episodes 19-36)", 19, 36),
+    ],
+    2: [
+        ("season2-part1.xml", "Season 2, Part 1 (Episodes 1-13)", 1, 13),
+        ("season2-part2.xml", "Season 2, Part 2 (Episodes 14-26)", 14, 26),
+    ],
+}
 
 RFC2822 = "%a, %d %b %Y %H:%M:%S +0000"
 
@@ -59,14 +68,14 @@ def fetch_source() -> ET.Element:
     return ET.fromstring(data)
 
 
-def season1_full_episodes(root: ET.Element) -> list[tuple[int, ET.Element]]:
+def season_full_episodes(root: ET.Element, season: int) -> list[tuple[int, ET.Element]]:
     channel = root.find("channel")
     items = []
     for item in channel.findall("item"):
         ep_type = item.findtext("itunes:episodeType", namespaces=NS)
-        season = item.findtext("itunes:season", namespaces=NS)
+        item_season = item.findtext("itunes:season", namespaces=NS)
         episode = item.findtext("itunes:episode", namespaces=NS)
-        if ep_type == "full" and season == "1" and episode:
+        if ep_type == "full" and item_season == str(season) and episode:
             items.append((int(episode), item))
     items.sort(key=lambda pair: pair[0])
     return items
@@ -87,11 +96,10 @@ def build_channel(source_channel: ET.Element, title_suffix: str) -> ET.Element:
     link = ET.SubElement(channel, "link")
     link.text = "https://titansofallterra.libsyn.com/"
 
-    desc_src = source_channel.find("itunes:summary", NS)
     description = ET.SubElement(channel, "description")
     description.text = (
-        f"Custom fan-made feed: Season 1 story episodes only, in season "
-        f"order, trimmed for Yoto's 25-track limit. {title_suffix}. "
+        f"Custom fan-made feed: story episodes only, in season order, "
+        f"trimmed for Yoto's 25-track limit. {title_suffix}. "
         f"Original show: The Titans of All'Terra by Joshua Lorimer."
     )
 
@@ -122,41 +130,43 @@ def build_channel(source_channel: ET.Element, title_suffix: str) -> ET.Element:
 def main() -> None:
     root = fetch_source()
     source_channel = root.find("channel")
-    all_season1 = dict(season1_full_episodes(root))
-    print(f"Found {len(all_season1)} Season 1 full episodes in source feed.")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    for filename, label, lo, hi in PARTS:
-        eps = [(n, all_season1[n]) for n in range(lo, hi + 1) if n in all_season1]
-        if len(eps) != (hi - lo + 1):
-            missing = set(range(lo, hi + 1)) - {n for n, _ in eps}
-            print(f"WARNING: missing episodes in source feed for {filename}: {sorted(missing)}")
+    for season, parts in SEASONS.items():
+        all_eps = dict(season_full_episodes(root, season))
+        print(f"Found {len(all_eps)} Season {season} full episodes in source feed.")
 
-        channel = build_channel(source_channel, label)
+        for filename, label, lo, hi in parts:
+            eps = [(n, all_eps[n]) for n in range(lo, hi + 1) if n in all_eps]
+            if len(eps) != (hi - lo + 1):
+                missing = set(range(lo, hi + 1)) - {n for n, _ in eps}
+                print(f"WARNING: missing episodes in source feed for {filename}: {sorted(missing)}")
 
-        # Newest fake pubDate first (Episode `lo`), stepping 1 hour older
-        # per subsequent episode, so Yoto's newest-first playback yields
-        # correct season order.
-        base = datetime.datetime.now(datetime.timezone.utc).replace(
-            minute=0, second=0, microsecond=0
-        )
-        for offset, (ep_num, item) in enumerate(eps):
-            fake_date = base - datetime.timedelta(hours=offset)
-            pubdate_el = item.find("pubDate")
-            if pubdate_el is None:
-                pubdate_el = ET.SubElement(item, "pubDate")
-            pubdate_el.text = fake_date.strftime(RFC2822)
-            channel.append(item)
+            channel = build_channel(source_channel, label)
 
-        rss = ET.Element("rss", {"version": "2.0"})
-        rss.append(channel)
+            # Newest fake pubDate first (Episode `lo`), stepping 1 hour older
+            # per subsequent episode, so Yoto's newest-first playback yields
+            # correct season order.
+            base = datetime.datetime.now(datetime.timezone.utc).replace(
+                minute=0, second=0, microsecond=0
+            )
+            for offset, (ep_num, item) in enumerate(eps):
+                fake_date = base - datetime.timedelta(hours=offset)
+                pubdate_el = item.find("pubDate")
+                if pubdate_el is None:
+                    pubdate_el = ET.SubElement(item, "pubDate")
+                pubdate_el.text = fake_date.strftime(RFC2822)
+                channel.append(item)
 
-        tree = ET.ElementTree(rss)
-        ET.indent(tree, space="  ")
-        out_path = OUT_DIR / filename
-        tree.write(out_path, encoding="UTF-8", xml_declaration=True)
-        print(f"Wrote {out_path} ({len(eps)} episodes, {label})")
+            rss = ET.Element("rss", {"version": "2.0"})
+            rss.append(channel)
+
+            tree = ET.ElementTree(rss)
+            ET.indent(tree, space="  ")
+            out_path = OUT_DIR / filename
+            tree.write(out_path, encoding="UTF-8", xml_declaration=True)
+            print(f"Wrote {out_path} ({len(eps)} episodes, {label})")
 
 
 if __name__ == "__main__":

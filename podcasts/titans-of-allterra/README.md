@@ -1,6 +1,6 @@
-# The Titans of All'Terra — Season 1
+# The Titans of All'Terra
 
-Custom RSS feeds for loading *The Titans of All'Terra* — Season 1 — onto a
+Custom RSS feeds for loading *The Titans of All'Terra* onto a
 [Yoto Player](https://yotoplay.com/) via a custom RSS card.
 
 ## Why this exists
@@ -9,20 +9,25 @@ Custom RSS feeds for loading *The Titans of All'Terra* — Season 1 — onto a
   plays them **newest → oldest**.
 - The show's real feed mixes story episodes with bonus tracks (cast intros,
   "autopsy" recap episodes, Kickstarter plugs, etc).
-- Season 1 alone has **36** story episodes — over Yoto's 25-track limit.
+- Season 1 has **36** story episodes and Season 2 has **26** — both over
+  Yoto's 25-track limit.
 
-To work around this, this folder publishes two trimmed, reordered feeds:
+To work around this, this folder publishes trimmed, reordered feeds, split
+per season into parts that each fit under the limit:
 
 | Feed | Episodes | File |
 |---|---|---|
 | Season 1, Part 1 | 1–18 | [`feeds/season1-part1.xml`](feeds/season1-part1.xml) |
 | Season 1, Part 2 | 19–36 | [`feeds/season1-part2.xml`](feeds/season1-part2.xml) |
+| Season 2, Part 1 | 1–13 | [`feeds/season2-part1.xml`](feeds/season2-part1.xml) |
+| Season 2, Part 2 | 14–26 | [`feeds/season2-part2.xml`](feeds/season2-part2.xml) |
 
 Each feed contains only "full" story episodes (no bonus/trailer tracks) and
 has fake, evenly-spaced `pubDate`s assigned in *reverse* order, so that when
 Yoto sorts newest-first, playback comes out in correct season order
-(Episode 1 first, Episode 18/36 last). The actual audio files, titles, and
-descriptions are untouched — pulled straight from the source feed.
+(Episode 1 of the part first, last episode of the part last). The actual
+audio files, titles, and descriptions are untouched — pulled straight from
+the source feed.
 
 ## Use with Yoto
 
@@ -31,6 +36,8 @@ Add a custom RSS card in the Yoto app/console using the raw feed URL, e.g.:
 ```
 https://raw.githubusercontent.com/jbtule/yoto_custom_podcast/main/podcasts/titans-of-allterra/feeds/season1-part1.xml
 https://raw.githubusercontent.com/jbtule/yoto_custom_podcast/main/podcasts/titans-of-allterra/feeds/season1-part2.xml
+https://raw.githubusercontent.com/jbtule/yoto_custom_podcast/main/podcasts/titans-of-allterra/feeds/season2-part1.xml
+https://raw.githubusercontent.com/jbtule/yoto_custom_podcast/main/podcasts/titans-of-allterra/feeds/season2-part2.xml
 ```
 
 ## Rebuilding the feeds

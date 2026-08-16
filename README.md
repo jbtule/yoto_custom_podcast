@@ -9,7 +9,7 @@ Each podcast gets its own folder under `podcasts/`.
 ## Podcasts
 
 - [`podcasts/titans-of-allterra`](podcasts/titans-of-allterra) — *The Titans
-  of All'Terra*, Season 1, split into two 18-episode feeds, story episodes
+  of All'Terra*, Seasons 1 & 2, each split into two feeds, story episodes
   only, in correct season order.
 
 ## Layout convention
