@@ -2,12 +2,13 @@
 Thin wrapper around the bits of the Yoto API this tool needs:
 audio upload + transcode, and card (content) creation.
 
-Docs: https://yoto.dev/api/
+Docs: https://yoto.dev/api/ (incomplete in places -- the required
+`sha256` param on the upload-URL request, the nested `transcodedInfo`
+shape of the transcode poll response, and the icon-upload endpoint were
+confirmed by reading the working implementation in
+https://github.com/xkjq/yoto-up (MIT licensed), credit to its author.
 
-Set YOTO_DEBUG=1 to print raw request/response bodies for every call --
-useful for confirming/fixing the exact response shapes, since some of
-these were implemented from documentation summaries rather than a live
-account.
+Set YOTO_DEBUG=1 to print raw request/response bodies for every call.
 """
 from __future__ import annotations
 

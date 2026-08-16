@@ -86,6 +86,19 @@ Cards appear under **My Cards** in the Yoto app once created; you still
 need to link a physical MYO card icon to each one in the app to play it on
 a Yoto Player.
 
+## Credits
+
+The Yoto API isn't fully documented publicly, so `yoto_client.py`'s exact
+request/response shapes (the required `sha256` query param on the
+upload-URL request, the nested `transcodedInfo` fields in the transcode
+poll response, the icon-upload endpoint/params, and the scopes each call
+needs) were ground-truthed against
+[xkjq/yoto-up](https://github.com/xkjq/yoto-up) (MIT licensed), a working
+open-source Yoto client — thank you to its author. `icon_gen.py`'s bitmap
+font, color palette, and two-line layout are ported from
+[bettin/yoto-podcast-icons](https://github.com/bettin/yoto-podcast-icons)
+(MIT licensed), credit to its author.
+
 ## State
 
 `.state/` (gitignored) holds:
