@@ -26,7 +26,7 @@ import requests
 AUTH_BASE = "https://login.yotoplay.com"
 API_AUDIENCE = "https://api.yotoplay.com"
 REDIRECT_URI = "http://127.0.0.1:8787/callback"
-SCOPES = "offline_access user:content:manage"
+SCOPES = "offline_access user:content:manage user:icons:manage"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_DIR = os.path.join(HERE, ".state")

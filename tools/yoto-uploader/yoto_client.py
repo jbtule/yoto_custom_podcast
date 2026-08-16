@@ -11,6 +11,7 @@ account.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -34,11 +35,16 @@ class YotoClient:
     def upload_audio(self, file_path: str, on_progress=None) -> dict:
         """Upload a local audio file and wait for transcoding to finish.
 
-        Returns the `transcodedInfo` dict (format, duration, fileSize,
-        channels, transcodedSha256, ...).
+        Returns a flat dict: transcodedSha256, format, duration, fileSize,
+        channels.
         """
+        with open(file_path, "rb") as f:
+            data = f.read()
+        sha256 = hashlib.sha256(data).hexdigest()
+
         resp = self.session.get(
             f"{API_BASE}/media/transcode/audio/uploadUrl",
+            params={"sha256": sha256},
             headers={"Accept": "application/json"},
         )
         resp.raise_for_status()
@@ -49,8 +55,6 @@ class YotoClient:
         upload_id = upload["uploadId"]
 
         if upload_url:
-            with open(file_path, "rb") as f:
-                data = f.read()
             put_resp = requests.put(
                 upload_url,
                 data=data,
@@ -64,7 +68,7 @@ class YotoClient:
                 on_progress("already on Yoto's servers (dedup by checksum)")
 
         last_body = None
-        for attempt in range(120):
+        for attempt in range(180):
             poll = self.session.get(
                 f"{API_BASE}/media/upload/{upload_id}/transcoded",
                 params={"loudnorm": "false"},
@@ -75,9 +79,16 @@ class YotoClient:
             last_body = body
             if attempt == 0 or DEBUG:
                 _debug(f"transcode poll #{attempt}", body)
-            info = body.get("transcode") or body
-            if info.get("transcodedSha256"):
-                return info
+            transcode = body.get("transcode") or body
+            if transcode.get("transcodedSha256"):
+                info = transcode.get("transcodedInfo") or {}
+                return {
+                    "transcodedSha256": transcode["transcodedSha256"],
+                    "format": info.get("format"),
+                    "duration": info.get("duration"),
+                    "fileSize": info.get("fileSize"),
+                    "channels": info.get("channels"),
+                }
             if on_progress and attempt % 10 == 0 and attempt > 0:
                 on_progress(f"still transcoding... ({attempt}s)")
             time.sleep(1)

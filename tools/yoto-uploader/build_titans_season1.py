@@ -267,13 +267,16 @@ def upload_track(client: YotoClient, local_track: dict, card_index: int, episode
         manifest["icons"][icon_key] = icon_media_id
         save_manifest(manifest)
 
+    channels = info.get("channels") or "stereo"
+    channels = {1: "mono", 2: "stereo"}.get(channels, channels)  # API may return numeric channel counts
+
     track = {
         "title": local_track["title"],
         "trackUrl": f"yoto:#{info['transcodedSha256']}",
-        "format": info.get("format", "mp3"),
-        "duration": info.get("duration", local_track["duration"]),
-        "fileSize": info.get("fileSize", os.path.getsize(local_track["path"])),
-        "channels": info.get("channels", "stereo"),
+        "format": info.get("format") or "mp3",
+        "duration": info.get("duration") or local_track["duration"],
+        "fileSize": info.get("fileSize") or os.path.getsize(local_track["path"]),
+        "channels": channels,
         "icon_media_id": icon_media_id,
     }
     manifest["episodes"][key] = track
