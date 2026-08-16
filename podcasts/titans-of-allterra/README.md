@@ -31,12 +31,25 @@ the source feed.
 
 ## Use with Yoto
 
-Add a custom RSS card in the Yoto app/console using the raw feed URL, e.g.:
+Add one custom RSS card per feed in the Yoto app/console, using its raw URL:
 
+Season 1, Part 1 (Episodes 1–18):
 ```
 https://raw.githubusercontent.com/jbtule/yoto_custom_podcast/main/podcasts/titans-of-allterra/feeds/season1-part1.xml
+```
+
+Season 1, Part 2 (Episodes 19–36):
+```
 https://raw.githubusercontent.com/jbtule/yoto_custom_podcast/main/podcasts/titans-of-allterra/feeds/season1-part2.xml
+```
+
+Season 2, Part 1 (Episodes 1–13):
+```
 https://raw.githubusercontent.com/jbtule/yoto_custom_podcast/main/podcasts/titans-of-allterra/feeds/season2-part1.xml
+```
+
+Season 2, Part 2 (Episodes 14–26):
+```
 https://raw.githubusercontent.com/jbtule/yoto_custom_podcast/main/podcasts/titans-of-allterra/feeds/season2-part2.xml
 ```
 
