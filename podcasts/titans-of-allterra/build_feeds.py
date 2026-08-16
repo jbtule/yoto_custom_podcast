@@ -23,7 +23,7 @@ unchanged -- only channel/item metadata needed for ordering and filtering
 is rewritten.
 
 Run:
-    python3 scripts/build_feeds.py
+    python3 podcasts/titans-of-allterra/build_feeds.py
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 SOURCE_FEED_URL = "https://titansofallterra.libsyn.com/rss"
-OUT_DIR = Path(__file__).resolve().parent.parent / "feeds"
+OUT_DIR = Path(__file__).resolve().parent / "feeds"
 
 NS = {
     "itunes": "http://www.itunes.com/dtds/podcast-1.0.dtd",
