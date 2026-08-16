@@ -28,19 +28,26 @@ API_AUDIENCE = "https://api.yotoplay.com"
 REDIRECT_URI = "http://127.0.0.1:8787/callback"
 SCOPES = "offline_access user:content:manage"
 
-STATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".state")
+HERE = os.path.dirname(os.path.abspath(__file__))
+STATE_DIR = os.path.join(HERE, ".state")
 CREDENTIALS_PATH = os.path.join(STATE_DIR, "credentials.json")
+CONFIG_PATH = os.path.join(HERE, "secrets", "config.json")
 
 
 def _client_id() -> str:
     client_id = os.environ.get("YOTO_CLIENT_ID")
+    if not client_id and os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH) as f:
+            client_id = json.load(f).get("client_id")
     if not client_id:
         raise SystemExit(
-            "YOTO_CLIENT_ID is not set.\n"
+            "No Yoto client ID found.\n"
             "Register a public app at https://dashboard.yoto.dev/ with redirect URI\n"
             f"  {REDIRECT_URI}\n"
-            "then run:\n"
+            "then either:\n"
             "  export YOTO_CLIENT_ID=<your client id>\n"
+            "or write it to tools/yoto-uploader/secrets/config.json as:\n"
+            '  {"client_id": "<your client id>"}\n'
         )
     return client_id
 

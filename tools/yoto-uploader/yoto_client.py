@@ -67,3 +67,19 @@ class YotoClient:
         resp = self.session.post(f"{API_BASE}/content", json=content)
         resp.raise_for_status()
         return resp.json()
+
+    def upload_icon(self, png_path: str, filename: str) -> str:
+        """Upload a 16x16 PNG icon. Returns the mediaId to reference as
+        `yoto:#{mediaId}` in a chapter/track's display.icon16x16."""
+        with open(png_path, "rb") as f:
+            data = f.read()
+        resp = self.session.post(
+            f"{API_BASE}/media/displayIcons/user/me/upload",
+            params={"autoConvert": "true", "filename": filename},
+            headers={"Content-Type": "image/png"},
+            data=data,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        icon = body.get("displayIcon", body)
+        return icon["mediaId"]

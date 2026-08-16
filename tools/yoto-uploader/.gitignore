@@ -1,2 +1,5 @@
 # Downloaded audio, login tokens, upload manifests -- never commit any of this.
 .state/
+
+# Client ID / any local credentials.
+secrets/

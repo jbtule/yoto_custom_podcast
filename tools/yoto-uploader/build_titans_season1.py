@@ -10,6 +10,10 @@ no 25-track limit. Trades that for Yoto's own MYO limits instead:
                                    few cards as those caps allow, in season
                                    order.
 
+Each track also gets a custom 16x16 pixel icon (see icon_gen.py) showing
+its card number and episode number, e.g. "C03 / E18", with a small amber
+corner marker on the second half of a split episode.
+
 Nothing this script downloads, uploads, or caches is committed to git --
 see .gitignore. Only your Yoto login token and a small manifest of what's
 been uploaded so far live in tools/yoto-uploader/.state/, which is
@@ -34,6 +38,7 @@ import sys
 import urllib.request
 import xml.etree.ElementTree as ET
 
+from icon_gen import save_icon
 from yoto_auth import get_access_token
 from yoto_client import YotoClient
 
@@ -139,7 +144,7 @@ def split_audio(path: str, split_at: float, out_a: str, out_b: str):
 
 
 def prepare_episode_tracks(ep: dict) -> list[dict]:
-    """Download an episode and return 1-2 local track dicts (title, path)."""
+    """Download an episode and return 1-2 local track dicts (title, path, part)."""
     os.makedirs(WORK_DIR, exist_ok=True)
     base = f"ep{ep['episode']:02d}"
     raw_path = os.path.join(WORK_DIR, base + ".mp3")
@@ -147,7 +152,7 @@ def prepare_episode_tracks(ep: dict) -> list[dict]:
     duration = ffprobe_duration(raw_path)
 
     if duration <= SPLIT_THRESHOLD_SEC:
-        return [{"title": ep["title"], "path": raw_path, "duration": duration}]
+        return [{"title": ep["title"], "path": raw_path, "duration": duration, "part": None}]
 
     split_at = find_split_point(raw_path, duration)
     part_a = os.path.join(WORK_DIR, base + "a.mp3")
@@ -156,9 +161,25 @@ def prepare_episode_tracks(ep: dict) -> list[dict]:
     dur_a = ffprobe_duration(part_a)
     dur_b = ffprobe_duration(part_b)
     return [
-        {"title": f"{ep['title']} (Part 1)", "path": part_a, "duration": dur_a},
-        {"title": f"{ep['title']} (Part 2)", "path": part_b, "duration": dur_b},
+        {"title": f"{ep['title']} (Part 1)", "path": part_a, "duration": dur_a, "part": 1},
+        {"title": f"{ep['title']} (Part 2)", "path": part_b, "duration": dur_b, "part": 2},
     ]
+
+
+# --------------------------------------------------------------------------
+# Icons
+# --------------------------------------------------------------------------
+
+ICON_DIR = os.path.join(WORK_DIR, "icons")
+
+
+def prepare_icon(card_index: int, episode_num: int, part: int | None) -> str:
+    os.makedirs(ICON_DIR, exist_ok=True)
+    suffix = f"_p{part}" if part else ""
+    path = os.path.join(ICON_DIR, f"c{card_index:02d}_e{episode_num:02d}{suffix}.png")
+    if not os.path.exists(path):
+        save_icon(card_index, episode_num, path, part=part)
+    return path
 
 
 # --------------------------------------------------------------------------
@@ -211,8 +232,10 @@ def fetch_approx_durations(episodes: list[dict]):
 def load_manifest() -> dict:
     if os.path.exists(MANIFEST_PATH):
         with open(MANIFEST_PATH) as f:
-            return json.load(f)
-    return {"episodes": {}, "cards": {}}
+            manifest = json.load(f)
+        manifest.setdefault("icons", {})
+        return manifest
+    return {"episodes": {}, "cards": {}, "icons": {}}
 
 
 def save_manifest(manifest: dict):
@@ -225,7 +248,7 @@ def save_manifest(manifest: dict):
 # Upload + card creation
 # --------------------------------------------------------------------------
 
-def upload_track(client: YotoClient, local_track: dict, manifest: dict) -> dict:
+def upload_track(client: YotoClient, local_track: dict, card_index: int, episode_num: int, manifest: dict) -> dict:
     key = local_track["path"]
     cached = manifest["episodes"].get(key)
     if cached:
@@ -235,6 +258,15 @@ def upload_track(client: YotoClient, local_track: dict, manifest: dict) -> dict:
         print(f"    {local_track['title']}: {msg}")
 
     info = client.upload_audio(local_track["path"], on_progress=progress)
+
+    icon_path = prepare_icon(card_index, episode_num, local_track["part"])
+    icon_key = os.path.basename(icon_path)
+    icon_media_id = manifest["icons"].get(icon_key)
+    if not icon_media_id:
+        icon_media_id = client.upload_icon(icon_path, icon_key)
+        manifest["icons"][icon_key] = icon_media_id
+        save_manifest(manifest)
+
     track = {
         "title": local_track["title"],
         "trackUrl": f"yoto:#{info['transcodedSha256']}",
@@ -242,6 +274,7 @@ def upload_track(client: YotoClient, local_track: dict, manifest: dict) -> dict:
         "duration": info.get("duration", local_track["duration"]),
         "fileSize": info.get("fileSize", os.path.getsize(local_track["path"])),
         "channels": info.get("channels", "stereo"),
+        "icon_media_id": icon_media_id,
     }
     manifest["episodes"][key] = track
     save_manifest(manifest)
@@ -268,12 +301,13 @@ def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep
                         "duration": t["duration"],
                         "fileSize": t["fileSize"],
                         "channels": t.get("channels", "stereo"),
+                        "display": {"icon16x16": f"yoto:#{t['icon_media_id']}"},
                     }
                     for j, t in enumerate(tracks, start=1)
                 ],
                 "defaultTrackDisplay": f"{chapter_key}-01",
                 "defaultTrackAmbient": f"{chapter_key}-01",
-                "display": {},
+                "display": {"icon16x16": f"yoto:#{tracks[0]['icon_media_id']}"},
             }
         )
     first_ep, last_ep = episodes[0]["episode"], episodes[-1]["episode"]
@@ -332,7 +366,8 @@ def main():
         uploaded_tracks_by_ep = {}
         for ep in card:
             uploaded_tracks_by_ep[ep["episode"]] = [
-                upload_track(client, t, manifest) for t in local_tracks_by_ep[ep["episode"]]
+                upload_track(client, t, i, ep["episode"], manifest)
+                for t in local_tracks_by_ep[ep["episode"]]
             ]
 
         content = build_card_content(i, card, uploaded_tracks_by_ep)
