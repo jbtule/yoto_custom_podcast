@@ -86,6 +86,14 @@ def _refresh(client_id: str, refresh_token: str) -> dict | None:
 class _CallbackHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path != "/callback":
+            # e.g. the browser auto-requesting /favicon.ico -- ignore it,
+            # and importantly don't touch server.auth_code/auth_error, or
+            # this would silently clobber a just-received real callback.
+            self.send_response(404)
+            self.end_headers()
+            return
+
         params = urllib.parse.parse_qs(parsed.query)
         self.server.auth_code = params.get("code", [None])[0]
         self.server.auth_error = params.get("error_description", [None])[0]
