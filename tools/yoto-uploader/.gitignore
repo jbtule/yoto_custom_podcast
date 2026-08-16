@@ -1,0 +1,2 @@
+# Downloaded audio, login tokens, upload manifests -- never commit any of this.
+.state/

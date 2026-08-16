@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+"""
+Upload The Titans of All'Terra, Season 1 straight into Yoto's own MYO
+("Make Your Own") system as a set of real cards -- no GitHub, no RSS card,
+no 25-track limit. Trades that for Yoto's own MYO limits instead:
+
+  - 1 hour max per track       -> episodes over ~55 min get split near a
+                                   quiet point close to the midpoint.
+  - 6 hours / 500MB max per card -> episodes are greedily packed into as
+                                   few cards as those caps allow, in season
+                                   order.
+
+Nothing this script downloads, uploads, or caches is committed to git --
+see .gitignore. Only your Yoto login token and a small manifest of what's
+been uploaded so far live in tools/yoto-uploader/.state/, which is
+gitignored.
+
+Usage:
+    export YOTO_CLIENT_ID=<your client id from https://dashboard.yoto.dev/>
+    python3 build_titans_season1.py --dry-run     # show the card plan only
+    python3 build_titans_season1.py                # do it for real
+    python3 build_titans_season1.py --resume       # safe to re-run any time
+
+Requires ffmpeg/ffprobe on PATH (`brew install ffmpeg`).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import urllib.request
+import xml.etree.ElementTree as ET
+
+from yoto_auth import get_access_token
+from yoto_client import YotoClient
+
+SOURCE_FEED_URL = "https://titansofallterra.libsyn.com/rss"
+NS = {"itunes": "http://www.itunes.com/dtds/podcast-1.0.dtd"}
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+STATE_DIR = os.path.join(HERE, ".state")
+WORK_DIR = os.path.join(STATE_DIR, "work", "titans-season1")
+MANIFEST_PATH = os.path.join(STATE_DIR, "titans-season1-manifest.json")
+
+MAX_TRACK_SEC = 60 * 60          # Yoto per-track cap
+SPLIT_THRESHOLD_SEC = 55 * 60    # split earlier than the hard cap, with margin
+MAX_CARD_SEC = 6 * 60 * 60       # Yoto per-card cap
+MAX_CARD_BYTES = 500 * 1024 * 1024
+
+CARD_TITLE_PREFIX = "The Titans of All'Terra — S1"
+
+
+# --------------------------------------------------------------------------
+# Source feed
+# --------------------------------------------------------------------------
+
+def fetch_season1_episodes() -> list[dict]:
+    with urllib.request.urlopen(SOURCE_FEED_URL) as resp:
+        root = ET.fromstring(resp.read())
+    episodes = []
+    for item in root.find("channel").findall("item"):
+        ep_type = item.findtext("itunes:episodeType", namespaces=NS)
+        season = item.findtext("itunes:season", namespaces=NS)
+        episode = item.findtext("itunes:episode", namespaces=NS)
+        if ep_type != "full" or season != "1" or not episode:
+            continue
+        enclosure = item.find("enclosure")
+        episodes.append(
+            {
+                "episode": int(episode),
+                "title": item.findtext("title"),
+                "audio_url": enclosure.get("url"),
+                "approx_size": int(enclosure.get("length", 0)),
+            }
+        )
+    episodes.sort(key=lambda e: e["episode"])
+    return episodes
+
+
+# --------------------------------------------------------------------------
+# Local audio processing
+# --------------------------------------------------------------------------
+
+def require_ffmpeg():
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        raise SystemExit("ffmpeg/ffprobe not found on PATH. Install with: brew install ffmpeg")
+
+
+def ffprobe_duration(path: str) -> float:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", path],
+        capture_output=True, text=True, check=True,
+    )
+    return float(out.stdout.strip())
+
+
+def download(url: str, dest: str):
+    if os.path.exists(dest):
+        return
+    tmp = dest + ".part"
+    urllib.request.urlretrieve(url, tmp)
+    os.rename(tmp, dest)
+
+
+def find_split_point(path: str, duration: float) -> float:
+    """Pick a quiet-ish moment nearest the midpoint to split on."""
+    proc = subprocess.run(
+        ["ffmpeg", "-i", path, "-af", "silencedetect=noise=-30dB:d=0.5", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    midpoint = duration / 2
+    lo, hi = duration * 0.3, duration * 0.7
+    best, best_dist = None, None
+    for line in proc.stderr.splitlines():
+        if "silence_start" in line:
+            t = float(line.split("silence_start:")[1].strip())
+            if lo <= t <= hi:
+                dist = abs(t - midpoint)
+                if best_dist is None or dist < best_dist:
+                    best, best_dist = t, dist
+    return best if best is not None else midpoint
+
+
+def split_audio(path: str, split_at: float, out_a: str, out_b: str):
+    if os.path.exists(out_a) and os.path.exists(out_b):
+        return
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", path, "-to", f"{split_at}", "-c", "copy", out_a],
+        capture_output=True, check=True,
+    )
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", path, "-ss", f"{split_at}", "-c", "copy", out_b],
+        capture_output=True, check=True,
+    )
+
+
+def prepare_episode_tracks(ep: dict) -> list[dict]:
+    """Download an episode and return 1-2 local track dicts (title, path)."""
+    os.makedirs(WORK_DIR, exist_ok=True)
+    base = f"ep{ep['episode']:02d}"
+    raw_path = os.path.join(WORK_DIR, base + ".mp3")
+    download(ep["audio_url"], raw_path)
+    duration = ffprobe_duration(raw_path)
+
+    if duration <= SPLIT_THRESHOLD_SEC:
+        return [{"title": ep["title"], "path": raw_path, "duration": duration}]
+
+    split_at = find_split_point(raw_path, duration)
+    part_a = os.path.join(WORK_DIR, base + "a.mp3")
+    part_b = os.path.join(WORK_DIR, base + "b.mp3")
+    split_audio(raw_path, split_at, part_a, part_b)
+    dur_a = ffprobe_duration(part_a)
+    dur_b = ffprobe_duration(part_b)
+    return [
+        {"title": f"{ep['title']} (Part 1)", "path": part_a, "duration": dur_a},
+        {"title": f"{ep['title']} (Part 2)", "path": part_b, "duration": dur_b},
+    ]
+
+
+# --------------------------------------------------------------------------
+# Card packing (planning only -- uses feed-reported size/duration, which is
+# what the real audio matches closely enough to plan card boundaries with)
+# --------------------------------------------------------------------------
+
+def pack_into_cards(episodes: list[dict]) -> list[list[dict]]:
+    cards, current, cur_sec, cur_bytes = [], [], 0, 0
+    for ep in episodes:
+        dur = ep.get("approx_duration") or 0
+        size = ep["approx_size"]
+        if current and (cur_sec + dur > MAX_CARD_SEC or cur_bytes + size > MAX_CARD_BYTES):
+            cards.append(current)
+            current, cur_sec, cur_bytes = [], 0, 0
+        current.append(ep)
+        cur_sec += dur
+        cur_bytes += size
+    if current:
+        cards.append(current)
+    return cards
+
+
+def fetch_approx_durations(episodes: list[dict]):
+    """Fill in approx_duration (seconds) from itunes:duration for planning."""
+    with urllib.request.urlopen(SOURCE_FEED_URL) as resp:
+        root = ET.fromstring(resp.read())
+    by_ep = {}
+    for item in root.find("channel").findall("item"):
+        episode = item.findtext("itunes:episode", namespaces=NS)
+        if not episode:
+            continue
+        d = item.findtext("itunes:duration", namespaces=NS)
+        parts = [int(x) for x in d.split(":")]
+        if len(parts) == 3:
+            h, m, s = parts
+        elif len(parts) == 2:
+            h, m, s = 0, *parts
+        else:
+            h, m, s = 0, 0, parts[0]
+        by_ep[int(episode)] = h * 3600 + m * 60 + s
+    for ep in episodes:
+        ep["approx_duration"] = by_ep.get(ep["episode"], 0)
+
+
+# --------------------------------------------------------------------------
+# Manifest (idempotency across re-runs)
+# --------------------------------------------------------------------------
+
+def load_manifest() -> dict:
+    if os.path.exists(MANIFEST_PATH):
+        with open(MANIFEST_PATH) as f:
+            return json.load(f)
+    return {"episodes": {}, "cards": {}}
+
+
+def save_manifest(manifest: dict):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(MANIFEST_PATH, "w") as f:
+        json.dump(manifest, f, indent=2)
+
+
+# --------------------------------------------------------------------------
+# Upload + card creation
+# --------------------------------------------------------------------------
+
+def upload_track(client: YotoClient, local_track: dict, manifest: dict) -> dict:
+    key = local_track["path"]
+    cached = manifest["episodes"].get(key)
+    if cached:
+        return cached
+
+    def progress(msg):
+        print(f"    {local_track['title']}: {msg}")
+
+    info = client.upload_audio(local_track["path"], on_progress=progress)
+    track = {
+        "title": local_track["title"],
+        "trackUrl": f"yoto:#{info['transcodedSha256']}",
+        "format": info.get("format", "mp3"),
+        "duration": info.get("duration", local_track["duration"]),
+        "fileSize": info.get("fileSize", os.path.getsize(local_track["path"])),
+        "channels": info.get("channels", "stereo"),
+    }
+    manifest["episodes"][key] = track
+    save_manifest(manifest)
+    return track
+
+
+def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep: dict) -> dict:
+    chapters = []
+    for i, ep in enumerate(episodes, start=1):
+        tracks = local_tracks_by_ep[ep["episode"]]
+        chapter_key = f"{i:02d}"
+        chapters.append(
+            {
+                "key": chapter_key,
+                "title": ep["title"],
+                "tracks": [
+                    {
+                        "key": f"{chapter_key}-{j:02d}",
+                        "uid": f"c{chapter_key}t{j:02d}",
+                        "type": "audio",
+                        "format": t["format"],
+                        "title": t["title"],
+                        "trackUrl": t["trackUrl"],
+                        "duration": t["duration"],
+                        "fileSize": t["fileSize"],
+                        "channels": t.get("channels", "stereo"),
+                    }
+                    for j, t in enumerate(tracks, start=1)
+                ],
+                "defaultTrackDisplay": f"{chapter_key}-01",
+                "defaultTrackAmbient": f"{chapter_key}-01",
+                "display": {},
+            }
+        )
+    first_ep, last_ep = episodes[0]["episode"], episodes[-1]["episode"]
+    return {
+        "title": f"{CARD_TITLE_PREFIX} Card {card_index} (Episodes {first_ep}-{last_ep})",
+        "content": {
+            "chapters": chapters,
+            "playbackType": "linear",
+        },
+        "metadata": {"category": "stories", "languages": ["en"]},
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dry-run", action="store_true", help="Print the card plan and exit; no downloads/uploads.")
+    parser.add_argument("--force-login", action="store_true", help="Ignore any cached Yoto session and log in again.")
+    parser.add_argument("--only-card", type=int, help="Only process this card number (1-based).")
+    args = parser.parse_args()
+
+    episodes = fetch_season1_episodes()
+    fetch_approx_durations(episodes)
+    print(f"Found {len(episodes)} Season 1 full episodes.")
+
+    cards = pack_into_cards(episodes)
+    print(f"Planned {len(cards)} card(s):")
+    for i, card in enumerate(cards, start=1):
+        total_sec = sum(e["approx_duration"] for e in card)
+        total_mb = sum(e["approx_size"] for e in card) / 1024 / 1024
+        eps = [e["episode"] for e in card]
+        print(f"  Card {i}: episodes {eps[0]}-{eps[-1]} ({len(eps)} eps, "
+              f"~{total_sec/3600:.2f}h, ~{total_mb:.0f}MB)")
+
+    if args.dry_run:
+        return
+
+    require_ffmpeg()
+    manifest = load_manifest()
+    token = get_access_token(force_login=args.force_login)
+    client = YotoClient(token)
+
+    for i, card in enumerate(cards, start=1):
+        if args.only_card and i != args.only_card:
+            continue
+        card_key = str(i)
+        if card_key in manifest["cards"]:
+            print(f"Card {i} already created: {manifest['cards'][card_key]['cardId']} -- skipping.")
+            continue
+
+        print(f"\n=== Card {i}: episodes {card[0]['episode']}-{card[-1]['episode']} ===")
+        local_tracks_by_ep = {}
+        for ep in card:
+            print(f"  Preparing episode {ep['episode']}: {ep['title']}")
+            local_tracks_by_ep[ep["episode"]] = prepare_episode_tracks(ep)
+
+        uploaded_tracks_by_ep = {}
+        for ep in card:
+            uploaded_tracks_by_ep[ep["episode"]] = [
+                upload_track(client, t, manifest) for t in local_tracks_by_ep[ep["episode"]]
+            ]
+
+        content = build_card_content(i, card, uploaded_tracks_by_ep)
+        print(f"  Creating card '{content['title']}'...")
+        result = client.create_or_update_content(content)
+        card_id = result.get("cardId") or result.get("card", {}).get("cardId")
+        manifest["cards"][card_key] = {"cardId": card_id, "title": content["title"]}
+        save_manifest(manifest)
+        print(f"  Created: {card_id}")
+
+    print("\nDone. Cards should now show up under My Cards in the Yoto app.")
+
+
+if __name__ == "__main__":
+    main()

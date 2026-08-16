@@ -1,8 +1,16 @@
 # Yoto Custom Podcasts
 
-Custom RSS feeds for loading podcasts onto a [Yoto Player](https://yotoplay.com/)
-via its custom RSS card — trimmed and reordered to work around Yoto's quirks
-(only the latest 25 feed items load, and they play back newest → oldest).
+Two ways to get podcasts onto a [Yoto Player](https://yotoplay.com/):
+
+- **[`podcasts/`](podcasts/)** — Custom RSS feeds, trimmed and reordered to
+  work around Yoto's custom-RSS-card quirks (only the latest 25 feed items
+  load, and they play back newest → oldest). Feeds are published on GitHub
+  Pages/raw URLs; no audio is hosted here.
+- **[`tools/yoto-uploader/`](tools/yoto-uploader/)** — Uploads audio
+  directly into Yoto's own MYO system via the Yoto API, creating real cards
+  in your library instead of a custom-RSS card. Works around MYO's own
+  limits (1h/track, 6h & 500MB/card) instead of the RSS ones. Nothing it
+  downloads or uploads is ever committed to git.
 
 Each podcast gets its own folder under `podcasts/`.
 
