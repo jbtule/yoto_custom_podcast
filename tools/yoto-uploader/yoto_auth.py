@@ -26,7 +26,7 @@ import requests
 AUTH_BASE = "https://login.yotoplay.com"
 API_AUDIENCE = "https://api.yotoplay.com"
 REDIRECT_URI = "http://127.0.0.1:8787/callback"
-SCOPES = "offline_access family:library:read family:library:write media:transcode"
+SCOPES = "offline_access user:content:manage"
 
 STATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".state")
 CREDENTIALS_PATH = os.path.join(STATE_DIR, "credentials.json")
