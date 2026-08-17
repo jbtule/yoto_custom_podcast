@@ -9,11 +9,13 @@ Adapted for this project's layout, which differs from the source tool's
 "season / episode" convention because episodes here are grouped into
 *cards* (not seasons), and long episodes get split into two tracks:
 
-  Row 1 (y=2):  "S1.3" -- season number, then card number, colored per
-                card so cards are easy to tell apart at a glance (cycles
-                through whichever named palette the podcast config picks).
-                Assumes single-digit season and card numbers (true for how
-                many cards a season ever splits into here).
+  Row 1 (y=2):  "S1.3" -- season number, then card number, in one fixed
+                color for the whole season (whichever named palette the
+                podcast config picks for it -- different seasons/podcasts
+                look distinct from each other, but every card within one
+                season matches). Assumes single-digit season and card
+                numbers (true for how many cards a season ever splits
+                into here).
   Row 2 (y=9):  "E" + 2-digit episode number, in white.
   Bottom row:   split-episode marker, in amber -- blank for the first half
                 (looks the same as an unsplit episode), a half-width line
@@ -111,9 +113,12 @@ def _hex_to_rgba(hex_color: str) -> tuple[int, int, int, int]:
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), 255
 
 
-def card_color(card_num: int, palette: str = DEFAULT_PALETTE) -> tuple[int, int, int, int]:
+def season_color(palette: str = DEFAULT_PALETTE) -> tuple[int, int, int, int]:
+    """One fixed color for the whole season's labels -- consistent across
+    every card in that season (different seasons/podcasts still look
+    distinct from each other via their own configured palette)."""
     colors = PALETTES.get(palette, PALETTES[DEFAULT_PALETTE])
-    return _hex_to_rgba(colors[(card_num - 1) % len(colors)])
+    return _hex_to_rgba(colors[0])
 
 
 def _pad2(n: int) -> str:
@@ -158,7 +163,7 @@ def generate_icon(season: int, card_num: int, episode_num: int, part: int | None
     img = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
     pixels = img.load()
 
-    _draw_season_card_line(pixels, season, card_num, 2, card_color(card_num, palette))
+    _draw_season_card_line(pixels, season, card_num, 2, season_color(palette))
     _draw_line(pixels, "E", episode_num, 9, (255, 255, 255, 255))
 
     if part == 2:
@@ -180,7 +185,7 @@ def render_badge(season: int, card_num: int, palette: str = DEFAULT_PALETTE, sca
     text_w, text_h = 15, 5  # matches _draw_season_card_line's 4-glyph layout
     small = Image.new("RGBA", (text_w, text_h), (0, 0, 0, 0))
     pixels = small.load()
-    _draw_season_card_line(pixels, season, card_num, 0, card_color(card_num, palette))
+    _draw_season_card_line(pixels, season, card_num, 0, season_color(palette))
     big_text = small.resize((text_w * scale, text_h * scale), resample=Image.NEAREST)
 
     pad = scale
