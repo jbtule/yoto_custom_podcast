@@ -37,14 +37,14 @@ grouped by *card* rather than by season, and some episodes split into two
 tracks):
 
 ```
-C03     <- card number, colored (cycles through a 20-color palette per card)
+S1.3    <- season number . card number, colored (cycles through a 20-color palette per card)
 E18     <- episode number, white
 ```
 
-A split episode's second-half track gets a small amber pixel in the
-top-right corner as a "continued" marker; the first half and any unsplit
-episode have none. Icons are transparent-background PNGs (Yoto's own
-recommendation — pure black doesn't show on the player's screen).
+A split episode gets an amber progress line along the bottom row: half-width
+for the first half, full-width for the second half. Unsplit episodes have
+no line. Icons are transparent-background PNGs (Yoto's own recommendation
+— pure black doesn't show on the player's screen).
 
 ## Cover art
 

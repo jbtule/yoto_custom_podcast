@@ -55,6 +55,7 @@ SPLIT_THRESHOLD_SEC = 55 * 60    # split earlier than the hard cap, with margin
 MAX_CARD_SEC = 6 * 60 * 60       # Yoto per-card cap
 MAX_CARD_BYTES = 500 * 1024 * 1024
 
+SEASON = 1
 CARD_TITLE_PREFIX = "The Titans of All'Terra — S1"
 
 
@@ -185,7 +186,7 @@ def prepare_icon(card_index: int, episode_num: int, part: int | None) -> str:
     suffix = f"_p{part}" if part else ""
     path = os.path.join(ICON_DIR, f"c{card_index:02d}_e{episode_num:02d}{suffix}.png")
     if not os.path.exists(path):
-        save_icon(card_index, episode_num, path, part=part)
+        save_icon(SEASON, card_index, episode_num, path, part=part)
     return path
 
 

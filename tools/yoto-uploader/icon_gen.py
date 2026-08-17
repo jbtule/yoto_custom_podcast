@@ -9,13 +9,15 @@ Adapted for this project's layout, which differs from the source tool's
 "season / episode" convention because episodes here are grouped into
 *cards* (not seasons), and long episodes get split into two tracks:
 
-  Row 1 (y=2):  "C" + 2-digit card number, colored per card so cards are
-                easy to tell apart at a glance (cycles through the same
-                20-color palette the source project uses for seasons).
+  Row 1 (y=2):  "S1.3" -- season number, then card number, colored per
+                card so cards are easy to tell apart at a glance (cycles
+                through the same 20-color palette the source project uses
+                for seasons). Assumes single-digit season and card numbers
+                (true for how many cards a season ever splits into here).
   Row 2 (y=9):  "E" + 2-digit episode number, in white.
-  Corner pixel: track title's a second-half split ("Part 2")? then a
-                single amber pixel is set at (15, 0) as a "continued"
-                marker. Part 1 / unsplit episodes have no marker.
+  Bottom row:   split-episode progress marker, in amber -- a half-width
+                line for the first half, a full-width line for the second
+                half. Unsplit episodes have no line at all.
 
 16x16, transparent background (Yoto's own recommendation -- avoid pure
 black, which won't show on the player's screen).
@@ -36,8 +38,10 @@ FONT: dict[str, list[list[int]]] = {
     "7": [[1, 1, 1], [0, 0, 1], [0, 0, 1], [0, 1, 0], [0, 1, 0]],
     "8": [[1, 1, 1], [1, 0, 1], [1, 1, 1], [1, 0, 1], [1, 1, 1]],
     "9": [[1, 1, 1], [1, 0, 1], [1, 1, 1], [0, 0, 1], [1, 1, 1]],
+    "S": [[1, 1, 1], [1, 0, 0], [1, 1, 1], [0, 0, 1], [1, 1, 1]],
     "C": [[1, 1, 1], [1, 0, 0], [1, 0, 0], [1, 0, 0], [1, 1, 1]],
     "E": [[1, 1, 1], [1, 0, 0], [1, 1, 0], [1, 0, 0], [1, 1, 1]],
+    ".": [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 1, 0]],
     " ": [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]],
 }
 
@@ -50,7 +54,7 @@ PALETTE = [
     "#FF5722", "#3949AB", "#F48FB1", "#00ACC1", "#AFB42B",
 ]
 
-PART_MARKER_COLOR = (255, 204, 0, 255)  # amber -- matches the "Part 2" marker
+PART_MARKER_COLOR = (255, 204, 0, 255)  # amber -- matches the split-progress line
 
 ICON_SIZE = 16
 
@@ -85,23 +89,36 @@ def _draw_line(pixels, letter: str, num: int, y: int, color: tuple[int, int, int
     _draw_char(pixels, digits[1], 11, y, color)
 
 
-def generate_icon(card_num: int, episode_num: int, part: int | None = None) -> Image.Image:
+def _draw_season_card_line(pixels, season: int, card_num: int, y: int, color: tuple[int, int, int, int]):
+    """Draw "S<season>.<card>" as 4 glyphs: S, one digit, ., one digit.
+    Assumes single-digit season/card numbers (fits 4 glyphs in 16px)."""
+    chars = ["S", str(season % 10), ".", str(card_num % 10)]
+    for i, ch in enumerate(chars):
+        _draw_char(pixels, ch, i * 4, y, color)
+
+
+def generate_icon(season: int, card_num: int, episode_num: int, part: int | None = None) -> Image.Image:
     """Build one 16x16 RGBA icon.
 
     part: None for a whole/unsplit episode, or 1/2 to mark which half of a
-    split episode this track is (2 gets a small "continued" corner pixel).
+    split episode this track is -- 1 gets a half-width amber line along the
+    bottom row, 2 gets a full-width one.
     """
     img = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
     pixels = img.load()
 
-    _draw_line(pixels, "C", card_num, 2, card_color(card_num))
+    _draw_season_card_line(pixels, season, card_num, 2, card_color(card_num))
     _draw_line(pixels, "E", episode_num, 9, (255, 255, 255, 255))
 
-    if part == 2:
-        pixels[15, 0] = PART_MARKER_COLOR
+    if part == 1:
+        for x in range(0, 8):
+            pixels[x, 15] = PART_MARKER_COLOR
+    elif part == 2:
+        for x in range(0, 16):
+            pixels[x, 15] = PART_MARKER_COLOR
 
     return img
 
 
-def save_icon(card_num: int, episode_num: int, path: str, part: int | None = None):
-    generate_icon(card_num, episode_num, part=part).save(path, "PNG")
+def save_icon(season: int, card_num: int, episode_num: int, path: str, part: int | None = None):
+    generate_icon(season, card_num, episode_num, part=part).save(path, "PNG")
