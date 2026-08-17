@@ -73,6 +73,7 @@ class YotoClient:
         # minutes, and the API reports a real progress.percent we can watch.
         last_body = None
         last_percent = -1
+        last_phase = "processing"
         stalled_for = 0
         max_stall_seconds = 180  # give up only if no progress for this long
         max_total_seconds = 20 * 60
@@ -100,17 +101,20 @@ class YotoClient:
                     "channels": info.get("channels"),
                 }
 
-            percent = (transcode.get("progress") or {}).get("percent")
+            progress_info = transcode.get("progress") or {}
+            percent = progress_info.get("percent")
+            phase = progress_info.get("phase") or "processing"
+            last_phase = phase
             if percent is not None and percent != last_percent:
                 stalled_for = 0
                 last_percent = percent
                 if on_progress:
-                    on_progress(f"transcoding... {percent}%")
+                    on_progress(f"{phase}... {percent}%")
             else:
                 stalled_for += 2
                 if stalled_for >= max_stall_seconds:
                     raise TimeoutError(
-                        f"Transcoding stalled at {last_percent}% for {file_path} "
+                        f"{last_phase} stalled at {last_percent}% for {file_path} "
                         f"(no progress for {max_stall_seconds}s).\n"
                         f"Last poll response: {json.dumps(last_body, indent=2)}\n"
                         f"Re-run with YOTO_DEBUG=1 for the full request/response trail."
@@ -120,7 +124,7 @@ class YotoClient:
             elapsed += 2
 
         raise TimeoutError(
-            f"Transcoding did not finish for {file_path} within {max_total_seconds}s.\n"
+            f"{last_phase} did not finish for {file_path} within {max_total_seconds}s.\n"
             f"Last poll response: {json.dumps(last_body, indent=2)}\n"
             f"Re-run with YOTO_DEBUG=1 for the full request/response trail."
         )
