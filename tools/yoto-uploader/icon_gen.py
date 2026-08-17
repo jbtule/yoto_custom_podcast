@@ -203,7 +203,7 @@ def apply_cover_badge(cover: Image.Image, season: int, card_num: int, palette: s
     the visible area regardless of exactly how wide that crop ends up.
     """
     cover = cover.convert("RGBA")
-    scale = max(4, cover.width // 140)
+    scale = max(4, cover.width // 45)  # badge ~35% of cover width
     badge = render_badge(season, card_num, palette=palette, scale=scale)
     margin = badge.height // 2
     x = (cover.width - badge.width) // 2
