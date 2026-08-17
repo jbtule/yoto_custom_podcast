@@ -230,8 +230,14 @@ def _run_ffmpeg_with_progress(cmd: list[str], total_duration: float, label: str,
 def download(url: str, dest: str, label: str = ""):
     if os.path.exists(dest):
         return
-    tmp = dest + ".part"
-    urllib.request.urlretrieve(url, tmp, reporthook=_download_progress_hook(label))
+    # Temp filenames avoid sandwiching the real ".m4a" extension in the
+    # middle (e.g. NOT "ep12.m4a.part") -- "ep12.download-tmp" reads more
+    # clearly as "not a finished file yet" than "ep12.m4a.part" does.
+    base_no_ext, _ = os.path.splitext(dest)
+    downloading_tmp = base_no_ext + ".download-tmp"
+    encoding_tmp = base_no_ext + ".encode-tmp"
+
+    urllib.request.urlretrieve(url, downloading_tmp, reporthook=_download_progress_hook(label))
     print(" " * 60, end="\r")
     # Source mp3s often carry an embedded cover-art image as a second
     # (video) stream alongside the audio, and Yoto's own MP3 ingest
@@ -242,14 +248,13 @@ def download(url: str, dest: str, label: str = ""):
     # Confirmed via direct A/B test that the same audio re-encoded as
     # M4A/AAC uploads and plays correctly, so we convert straight to M4A
     # here rather than staying on MP3 at all.
-    raw_duration = ffprobe_duration(tmp)
-    stripped = dest + ".stripped"
+    raw_duration = ffprobe_duration(downloading_tmp)
     _run_ffmpeg_with_progress(
-        ["ffmpeg", "-y", "-i", tmp, "-map", "0:a:0", "-c:a", AAC_ENCODER, "-b:a", "128k", "-vn", "-f", "mp4", stripped],
+        ["ffmpeg", "-y", "-i", downloading_tmp, "-map", "0:a:0", "-c:a", AAC_ENCODER, "-b:a", "128k", "-vn", "-f", "mp4", encoding_tmp],
         raw_duration, label, "encoding",
     )
-    os.remove(tmp)
-    os.rename(stripped, dest)
+    os.remove(downloading_tmp)
+    os.rename(encoding_tmp, dest)
 
 
 def find_split_point(path: str, duration: float) -> float:
@@ -325,10 +330,10 @@ def prepare_base_cover_image(source_url: str) -> str:
     """Download the podcast's own cover art once, cached locally."""
     path = os.path.join(WORK_DIR, "cover_base.png")
     if not os.path.exists(path):
-        tmp = path + ".part"
-        urllib.request.urlretrieve(source_url, tmp)
-        Image.open(tmp).convert("RGB").save(path, "PNG")
-        os.remove(tmp)
+        downloading_tmp = os.path.join(WORK_DIR, "cover_base.download-tmp")
+        urllib.request.urlretrieve(source_url, downloading_tmp)
+        Image.open(downloading_tmp).convert("RGB").save(path, "PNG")
+        os.remove(downloading_tmp)
     return path
 
 
