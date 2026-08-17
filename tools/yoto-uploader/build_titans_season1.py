@@ -305,7 +305,7 @@ def upload_track(client: YotoClient, local_track: dict, card_index: int, episode
 
 
 def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep: dict, cover_url: str | None,
-                        existing_card_id: str | None = None) -> dict:
+                        existing_card_id: str | None = None, title_suffix: str = "") -> dict:
     chapters = []
     card_duration = 0
     card_filesize = 0
@@ -362,7 +362,7 @@ def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep
     if cover_url:
         metadata["cover"] = {"imageL": cover_url}
     payload = {
-        "title": f"{CARD_TITLE_PREFIX} Card {card_index} (Episodes {first_ep}-{last_ep})",
+        "title": f"{CARD_TITLE_PREFIX} Card {card_index} (Episodes {first_ep}-{last_ep}){title_suffix}",
         "content": {
             "chapters": chapters,
             "playbackType": "linear",
@@ -382,6 +382,11 @@ def main():
     parser.add_argument("--force-recreate", action="store_true",
                          help="Re-run an already-created card (e.g. --only-card 3), updating it in "
                               "place via its existing cardId instead of skipping or duplicating it.")
+    parser.add_argument("--as-new-card", action="store_true",
+                         help="Force a genuine create (no cardId) even if this card number was already "
+                              "created before, and record it under a separate manifest key ('<N>-new') "
+                              "so the original card's record is untouched. For diagnosing whether a "
+                              "problem is specific to an existing card's update history.")
     args = parser.parse_args()
 
     episodes = fetch_season1_episodes()
@@ -417,8 +422,8 @@ def main():
     for i, card in enumerate(cards, start=1):
         if args.only_card and i != args.only_card:
             continue
-        card_key = str(i)
-        existing_card_id = manifest["cards"].get(card_key, {}).get("cardId")
+        card_key = f"{i}-new" if args.as_new_card else str(i)
+        existing_card_id = None if args.as_new_card else manifest["cards"].get(card_key, {}).get("cardId")
         if existing_card_id and not args.force_recreate:
             print(f"Card {i} already created: {existing_card_id} -- skipping.")
             continue
@@ -436,7 +441,8 @@ def main():
                 for t in local_tracks_by_ep[ep["episode"]]
             ]
 
-        content = build_card_content(i, card, uploaded_tracks_by_ep, cover_url, existing_card_id)
+        title_suffix = " [TEST]" if args.as_new_card else ""
+        content = build_card_content(i, card, uploaded_tracks_by_ep, cover_url, existing_card_id, title_suffix)
         print(f"  Creating card '{content['title']}'...")
         result = client.create_or_update_content(content)
         card_id = result.get("cardId") or result.get("card", {}).get("cardId")
