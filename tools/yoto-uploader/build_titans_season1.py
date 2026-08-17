@@ -116,7 +116,19 @@ def download(url: str, dest: str):
         return
     tmp = dest + ".part"
     urllib.request.urlretrieve(url, tmp)
-    os.rename(tmp, dest)
+    # These mp3s carry an embedded cover-art image as a second (video)
+    # stream alongside the audio. Strip it down to audio-only before it
+    # goes anywhere near ffprobe/ffmpeg splitting or Yoto's own
+    # transcoder -- a multi-stream file is at best noise for local
+    # tooling (it tripped up a naive ffmpeg volume check) and at worst a
+    # plausible cause of Yoto-side transcode weirdness on some episodes.
+    stripped = dest + ".stripped"
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", tmp, "-map", "0:a:0", "-c:a", "copy", "-vn", "-f", "mp3", stripped],
+        capture_output=True, check=True,
+    )
+    os.remove(tmp)
+    os.rename(stripped, dest)
 
 
 def find_split_point(path: str, duration: float) -> float:
