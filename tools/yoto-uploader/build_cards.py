@@ -53,7 +53,7 @@ import xml.etree.ElementTree as ET
 import yaml
 from PIL import Image
 
-from icon_gen import apply_cover_badge, save_icon
+from icon_gen import apply_cover_badge, pad_to_safe_portrait, save_icon
 from yoto_auth import get_access_token
 from yoto_client import YotoClient
 
@@ -277,12 +277,16 @@ def prepare_base_cover_image(source_url: str) -> str:
 
 def prepare_card_cover(card_index: int, base_cover_path: str) -> str:
     """Composite this card's S<season>.<card> badge onto a copy of the
-    base cover art. See icon_gen.apply_cover_badge for placement notes
-    (the app crops covers to a narrower portrait shape for display)."""
+    base cover art. Padded to a portrait shape first (see
+    icon_gen.pad_to_safe_portrait) so the app's own crop for its card-list
+    display -- confirmed to trim left/right, keeping full height -- can't
+    cut into the real art; the badge (icon_gen.apply_cover_badge) then
+    goes near the top of that padded canvas."""
     path = os.path.join(WORK_DIR, f"cover_card{card_index:02d}.png")
     if not os.path.exists(path):
         base = Image.open(base_cover_path)
-        badged = apply_cover_badge(base, SEASON, card_index, palette=ICON_PALETTE)
+        padded = pad_to_safe_portrait(base)
+        badged = apply_cover_badge(padded, SEASON, card_index, palette=ICON_PALETTE)
         badged.convert("RGB").save(path, "PNG")
     return path
 

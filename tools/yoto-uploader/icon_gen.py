@@ -194,20 +194,60 @@ def render_badge(season: int, card_num: int, palette: str = DEFAULT_PALETTE, sca
     return badge
 
 
+# Best guess at the app's card-list crop: full height kept, width
+# trimmed to this fraction of height (matches the physical MYO card's
+# real proportions, 85.6mm x 54mm => height/width ~= 1.585). Unconfirmed
+# exact value from Yoto, but the padding below only ever costs a soft
+# blurred border if the guess is off -- it never crops real art.
+GUESSED_CROP_HEIGHT_TO_WIDTH_RATIO = 1.585
+
+
+def _edge_color(cover: Image.Image) -> tuple[int, int, int]:
+    """Average of the four corner pixels -- a decent guess at a cover's
+    background color for art with a plain border (common for podcast
+    cover art), without needing to understand the image's content."""
+    w, h = cover.size
+    corners = [cover.getpixel((0, 0)), cover.getpixel((w - 1, 0)),
+               cover.getpixel((0, h - 1)), cover.getpixel((w - 1, h - 1))]
+    return tuple(sum(c[i] for c in corners) // 4 for i in range(3))
+
+
+def pad_to_safe_portrait(cover: Image.Image, target_ratio: float = GUESSED_CROP_HEIGHT_TO_WIDTH_RATIO) -> Image.Image:
+    """Fit `cover` (typically square) into a canvas at `target_ratio`
+    (height/width) without cropping any of it: the full image is scaled
+    to fit inside, centered, and the leftover space is filled with a
+    solid color sampled from the art's own corners (blends in for the
+    plain-background-bordered art typical of podcast covers) rather than
+    a flat guessed color or (worse) left for the app to crop into. If the
+    app's actual crop ratio differs from our guess, the cost is a
+    slightly-off solid border -- never lost content, since nothing
+    outside this function's own control ever crops the real art.
+    """
+    cover = cover.convert("RGB")
+    w, h = cover.size
+    canvas_w, canvas_h = w, round(w * target_ratio)
+    if canvas_h <= h:
+        return cover  # already tall enough relative to width
+
+    canvas = Image.new("RGBA", (canvas_w, canvas_h), _edge_color(cover) + (255,))
+    canvas.paste(cover, (0, (canvas_h - h) // 2))
+    return canvas
+
+
 def apply_cover_badge(cover: Image.Image, season: int, card_num: int, palette: str = DEFAULT_PALETTE) -> Image.Image:
     """Return a copy of `cover` with a season.card badge composited on.
 
-    Placed horizontally centered, near the bottom: the app is known to
-    crop the cover's left/right edges to a narrower (portrait) shape for
-    display, keeping full height, so a centered-low badge stays inside
-    the visible area regardless of exactly how wide that crop ends up.
+    Placed horizontally centered, near the top: the app is known to crop
+    the cover's left/right edges to a narrower (portrait) shape for
+    display, keeping full height, so a centered badge stays inside the
+    visible area regardless of exactly how wide that crop ends up.
     """
     cover = cover.convert("RGBA")
     scale = max(4, cover.width // 45)  # badge ~35% of cover width
     badge = render_badge(season, card_num, palette=palette, scale=scale)
     margin = badge.height // 2
     x = (cover.width - badge.width) // 2
-    y = cover.height - badge.height - margin
+    y = margin
     out = cover.copy()
     out.alpha_composite(badge, (x, y))
     return out
