@@ -307,9 +307,15 @@ def upload_track(client: YotoClient, local_track: dict, card_index: int, episode
 def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep: dict, cover_url: str | None,
                         existing_card_id: str | None = None) -> dict:
     chapters = []
+    card_duration = 0
+    card_filesize = 0
     for i, ep in enumerate(episodes, start=1):
         tracks = local_tracks_by_ep[ep["episode"]]
         chapter_key = f"{i:02d}"
+        chapter_duration = sum(t["duration"] for t in tracks)
+        chapter_filesize = sum(t["fileSize"] for t in tracks)
+        card_duration += chapter_duration
+        card_filesize += chapter_filesize
         chapters.append(
             {
                 "key": chapter_key,
@@ -326,9 +332,18 @@ def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep
                         "fileSize": t["fileSize"],
                         "channels": t.get("channels", "stereo"),
                         "display": {"icon16x16": f"yoto:#{t['icon_media_id']}"},
+                        "overlayLabel": str(j),
                     }
                     for j, t in enumerate(tracks, start=1)
                 ],
+                # Chapter-level aggregates -- not just cosmetic. Suspected
+                # necessary for the physical player's download/playback
+                # gating (it showed complete downloads but silent playback
+                # on every chapter until these were added; cloud streaming
+                # via the app worked the whole time, which fits since that
+                # path wouldn't depend on pre-aggregated duration/fileSize).
+                "duration": chapter_duration,
+                "fileSize": chapter_filesize,
                 "defaultTrackDisplay": f"{chapter_key}-01",
                 "defaultTrackAmbient": f"{chapter_key}-01",
                 "display": {"icon16x16": f"yoto:#{tracks[0]['icon_media_id']}"},
@@ -339,7 +354,11 @@ def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep
     # cards (streamed, not downloaded for offline play) -- "stories" is
     # correct for MYO cards with uploaded audio, which need to actually
     # download onto the device.
-    metadata = {"category": "stories", "languages": ["en"]}
+    metadata = {
+        "category": "stories",
+        "languages": ["en"],
+        "media": {"duration": card_duration, "fileSize": card_filesize, "hasStreams": False},
+    }
     if cover_url:
         metadata["cover"] = {"imageL": cover_url}
     payload = {
