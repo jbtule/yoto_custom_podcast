@@ -322,7 +322,11 @@ def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep
             }
         )
     first_ep, last_ep = episodes[0]["episode"], episodes[-1]["episode"]
-    metadata = {"category": "podcast", "languages": ["en"]}
+    # NOTE: category "podcast" is for Yoto's own RSS-feed-linked podcast
+    # cards (streamed, not downloaded for offline play) -- "stories" is
+    # correct for MYO cards with uploaded audio, which need to actually
+    # download onto the device.
+    metadata = {"category": "stories", "languages": ["en"]}
     if cover_url:
         metadata["cover"] = {"imageL": cover_url}
     payload = {
