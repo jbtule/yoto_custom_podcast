@@ -1,7 +1,7 @@
 """
 16x16 pixel-icon generator for Yoto MYO cards.
 
-Ported from the 3x5 bitmap font, color palette, and two-line layout of
+Ported from the 3x5 bitmap font, color palettes, and two-line layout of
 https://github.com/bettin/yoto-podcast-icons (MIT licensed) -- credit to
 its author for the original design.
 
@@ -11,9 +11,9 @@ Adapted for this project's layout, which differs from the source tool's
 
   Row 1 (y=2):  "S1.3" -- season number, then card number, colored per
                 card so cards are easy to tell apart at a glance (cycles
-                through the same 20-color palette the source project uses
-                for seasons). Assumes single-digit season and card numbers
-                (true for how many cards a season ever splits into here).
+                through whichever named palette the podcast config picks).
+                Assumes single-digit season and card numbers (true for how
+                many cards a season ever splits into here).
   Row 2 (y=9):  "E" + 2-digit episode number, in white.
   Bottom row:   split-episode marker, in amber -- blank for the first half
                 (looks the same as an unsplit episode), a half-width line
@@ -45,14 +45,61 @@ FONT: dict[str, list[list[int]]] = {
     " ": [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]],
 }
 
-# The source project's "original" 20-color palette -- distinct saturated
-# hues, cycled here per card number instead of per season.
-PALETTE = [
-    "#4A90D9", "#50C878", "#E74C3C", "#F39C12", "#9B59B6",
-    "#1ABC9C", "#E91E63", "#FF6F00", "#00BCD4", "#8BC34A",
-    "#795548", "#607D8B", "#FFEB3B", "#7B1FA2", "#00897B",
-    "#FF5722", "#3949AB", "#F48FB1", "#00ACC1", "#AFB42B",
-]
+# All 8 named palettes from the source project (bettin/yoto-podcast-icons),
+# ported verbatim. Each podcast/season in podcasts.yaml picks one by name
+# via its `icon_palette` field, so different shows/seasons read as visually
+# distinct at a glance.
+PALETTES: dict[str, list[str]] = {
+    "original": [
+        "#4A90D9", "#50C878", "#E74C3C", "#F39C12", "#9B59B6",
+        "#1ABC9C", "#E91E63", "#FF6F00", "#00BCD4", "#8BC34A",
+        "#795548", "#607D8B", "#FFEB3B", "#7B1FA2", "#00897B",
+        "#FF5722", "#3949AB", "#F48FB1", "#00ACC1", "#AFB42B",
+    ],
+    "cmyk": [
+        "#00AADD", "#DD0077", "#DDCC00", "#00AA77", "#7700AA",
+        "#DD6600", "#0077DD", "#AA0055", "#00DD99", "#DD3388",
+        "#009999", "#BB4400", "#6600CC", "#AADD00", "#DD0044",
+        "#0055AA", "#CC7700", "#880088", "#00CC66", "#DD5599",
+    ],
+    "cmyk_bright": [
+        "#00CCFF", "#FF00CC", "#FFCC00", "#00FF88", "#8800FF",
+        "#FF6600", "#0088FF", "#CC0066", "#88DD00", "#FF3399",
+        "#00FFCC", "#FF4400", "#5500FF", "#CCFF00", "#FF0066",
+        "#0044FF", "#FF9900", "#AA00FF", "#00FF44", "#FF0099",
+    ],
+    "warm": [
+        "#E74C3C", "#FF6F00", "#F39C12", "#FFD600", "#E91E63",
+        "#FF5252", "#FF8F00", "#D84315", "#F06292", "#FFAB40",
+        "#C62828", "#E65100", "#F9A825", "#FFD740", "#AD1457",
+        "#FF1744", "#EF6C00", "#BF360C", "#EC407A", "#FFC400",
+    ],
+    "cool": [
+        "#2196F3", "#00BCD4", "#009688", "#4CAF50", "#7C4DFF",
+        "#1DE9B6", "#3F51B5", "#00E5FF", "#69F0AE", "#651FFF",
+        "#1565C0", "#00838F", "#00695C", "#2E7D32", "#4527A0",
+        "#00BFA5", "#283593", "#0091EA", "#00C853", "#AA00FF",
+    ],
+    "pastel": [
+        "#7EB8DA", "#82CA9D", "#E88E8E", "#F0C674", "#B094D0",
+        "#7ECAC5", "#E088A8", "#D9A86C", "#88C8D0", "#A8D08D",
+        "#A0C4E8", "#9ED4B0", "#F0A8A0", "#F5D590", "#C8AEE0",
+        "#98D8D0", "#F0A0B8", "#E4C08E", "#A0D8E0", "#B8E0A0",
+    ],
+    "neon": [
+        "#00E5FF", "#00FF66", "#FF1744", "#FFEA00", "#D500F9",
+        "#00E676", "#FF4081", "#FF9100", "#18FFFF", "#76FF03",
+        "#00B0FF", "#00FFAA", "#FF3D00", "#FFD600", "#E040FB",
+        "#64FFDA", "#FF80AB", "#FFAB00", "#84FFFF", "#B2FF59",
+    ],
+    "rainbow": [
+        "#FF0044", "#FF3300", "#FF6600", "#FF9900", "#FFCC00",
+        "#DDEE00", "#88DD00", "#00CC22", "#00CC66", "#00CCAA",
+        "#00CCDD", "#0099FF", "#0055FF", "#0000FF", "#4400DD",
+        "#7700BB", "#AA0099", "#DD0077", "#FF0055", "#FF0033",
+    ],
+}
+DEFAULT_PALETTE = "original"
 
 PART_MARKER_COLOR = (255, 204, 0, 255)  # amber -- matches the split-progress line
 
@@ -64,8 +111,9 @@ def _hex_to_rgba(hex_color: str) -> tuple[int, int, int, int]:
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), 255
 
 
-def card_color(card_num: int) -> tuple[int, int, int, int]:
-    return _hex_to_rgba(PALETTE[(card_num - 1) % len(PALETTE)])
+def card_color(card_num: int, palette: str = DEFAULT_PALETTE) -> tuple[int, int, int, int]:
+    colors = PALETTES.get(palette, PALETTES[DEFAULT_PALETTE])
+    return _hex_to_rgba(colors[(card_num - 1) % len(colors)])
 
 
 def _pad2(n: int) -> str:
@@ -97,17 +145,20 @@ def _draw_season_card_line(pixels, season: int, card_num: int, y: int, color: tu
         _draw_char(pixels, ch, i * 4, y, color)
 
 
-def generate_icon(season: int, card_num: int, episode_num: int, part: int | None = None) -> Image.Image:
+def generate_icon(season: int, card_num: int, episode_num: int, part: int | None = None,
+                   palette: str = DEFAULT_PALETTE) -> Image.Image:
     """Build one 16x16 RGBA icon.
 
     part: None for a whole/unsplit episode, or 1/2 to mark which half of a
     split episode this track is -- 1 looks the same as unsplit (blank), 2
     gets a half-width amber line along the bottom row.
+    palette: name of an entry in PALETTES; unknown names fall back to
+    DEFAULT_PALETTE.
     """
     img = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
     pixels = img.load()
 
-    _draw_season_card_line(pixels, season, card_num, 2, card_color(card_num))
+    _draw_season_card_line(pixels, season, card_num, 2, card_color(card_num, palette))
     _draw_line(pixels, "E", episode_num, 9, (255, 255, 255, 255))
 
     if part == 2:
@@ -117,5 +168,6 @@ def generate_icon(season: int, card_num: int, episode_num: int, part: int | None
     return img
 
 
-def save_icon(season: int, card_num: int, episode_num: int, path: str, part: int | None = None):
-    generate_icon(season, card_num, episode_num, part=part).save(path, "PNG")
+def save_icon(season: int, card_num: int, episode_num: int, path: str, part: int | None = None,
+              palette: str = DEFAULT_PALETTE):
+    generate_icon(season, card_num, episode_num, part=part, palette=palette).save(path, "PNG")

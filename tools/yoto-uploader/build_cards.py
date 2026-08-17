@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Upload The Titans of All'Terra, Season 1 straight into Yoto's own MYO
-("Make Your Own") system as a set of real cards -- no GitHub, no RSS card,
-no 25-track limit. Trades that for Yoto's own MYO limits instead:
+Upload a podcast season straight into Yoto's own MYO ("Make Your Own")
+system as a set of real cards -- no GitHub, no RSS card, no 25-track
+limit. Trades that for Yoto's own MYO limits instead:
 
   - 1 hour max per track       -> episodes over ~55 min get split near a
                                    quiet point close to the midpoint.
@@ -10,10 +10,16 @@ no 25-track limit. Trades that for Yoto's own MYO limits instead:
                                    few cards as those caps allow, in season
                                    order.
 
+Which podcast/season to build is picked with --podcast/--season; the
+podcast is looked up in podcasts.yaml (see that file for the config
+schema and how to add a new show). Nothing here is specific to any one
+podcast.
+
 Each track also gets a custom 16x16 pixel icon (see icon_gen.py) showing
-"S<season>.<card>" over the episode number, e.g. "S1.3 / E18", with an
-amber progress line along the bottom for split episodes (half-width for
-the first half, full-width for the second).
+"S<season>.<card>" over the episode number, e.g. "S1.3 / E18", colored
+per the podcast's configured icon_palette, with an amber progress line
+along the bottom for split episodes (blank for the first half, half-width
+for the second).
 
 Local audio is converted to M4A/AAC, not MP3 -- MP3 uploads proved
 unreliable through Yoto's own pipeline (confirmed via direct A/B test,
@@ -27,9 +33,10 @@ gitignored.
 
 Usage:
     export YOTO_CLIENT_ID=<your client id from https://dashboard.yoto.dev/>
-    python3 build_titans_season1.py --dry-run     # show the card plan only
-    python3 build_titans_season1.py                # do it for real
-    python3 build_titans_season1.py                # safe to re-run any time
+    python3 build_cards.py --list-podcasts                       # show configured podcasts
+    python3 build_cards.py --podcast titans --season 1 --dry-run  # show the card plan only
+    python3 build_cards.py --podcast titans --season 1             # do it for real
+    python3 build_cards.py --podcast titans --season 1             # safe to re-run any time
 
 Requires ffmpeg/ffprobe on PATH (`brew install ffmpeg`).
 """
@@ -40,29 +47,55 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import urllib.request
 import xml.etree.ElementTree as ET
+
+import yaml
 
 from icon_gen import save_icon
 from yoto_auth import get_access_token
 from yoto_client import YotoClient
 
-SOURCE_FEED_URL = "https://titansofallterra.libsyn.com/rss"
 NS = {"itunes": "http://www.itunes.com/dtds/podcast-1.0.dtd"}
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_DIR = os.path.join(HERE, ".state")
-WORK_DIR = os.path.join(STATE_DIR, "work", "titans-season1")
-MANIFEST_PATH = os.path.join(STATE_DIR, "titans-season1-manifest.json")
+PODCASTS_CONFIG_PATH = os.path.join(HERE, "podcasts.yaml")
 
 MAX_TRACK_SEC = 60 * 60          # Yoto per-track cap
 SPLIT_THRESHOLD_SEC = 55 * 60    # split earlier than the hard cap, with margin
 MAX_CARD_SEC = 6 * 60 * 60       # Yoto per-card cap
 MAX_CARD_BYTES = 500 * 1024 * 1024
 
-SEASON = 1
-CARD_TITLE_PREFIX = "The Titans of All'Terra — S1"
+# Populated in main() from podcasts.yaml for the selected --podcast; the
+# rest of this script reads them as module-level config, same pattern as
+# the WORK_DIR/MANIFEST_PATH/ICON_DIR paths below.
+FEED_URL: str = ""
+SEASON: int = 0
+CARD_TITLE_PREFIX: str = ""
+ICON_PALETTE: str = "original"
+WORK_DIR: str = ""
+MANIFEST_PATH: str = ""
+ICON_DIR: str = ""
+
+
+def load_podcasts_config() -> dict:
+    with open(PODCASTS_CONFIG_PATH) as f:
+        return yaml.safe_load(f)
+
+
+def configure_for_podcast(short_name: str, season: int, config: dict):
+    """Set the module-level config globals for the selected podcast+season."""
+    global FEED_URL, SEASON, CARD_TITLE_PREFIX, ICON_PALETTE, WORK_DIR, MANIFEST_PATH, ICON_DIR
+    entry = config[short_name]
+    FEED_URL = entry["feed_url"]
+    SEASON = season
+    CARD_TITLE_PREFIX = f"{entry['title']} — S{season}"
+    ICON_PALETTE = entry.get("icon_palettes", {}).get(season, entry.get("default_icon_palette", "original"))
+    state_key = f"{short_name}-s{season}"
+    WORK_DIR = os.path.join(STATE_DIR, "work", state_key)
+    MANIFEST_PATH = os.path.join(STATE_DIR, f"{state_key}-manifest.json")
+    ICON_DIR = os.path.join(WORK_DIR, "icons")
 
 
 # --------------------------------------------------------------------------
@@ -70,21 +103,21 @@ CARD_TITLE_PREFIX = "The Titans of All'Terra — S1"
 # --------------------------------------------------------------------------
 
 def fetch_channel_image_url() -> str | None:
-    with urllib.request.urlopen(SOURCE_FEED_URL) as resp:
+    with urllib.request.urlopen(FEED_URL) as resp:
         root = ET.fromstring(resp.read())
     image = root.find("channel").find("image")
     return image.findtext("url") if image is not None else None
 
 
-def fetch_season1_episodes() -> list[dict]:
-    with urllib.request.urlopen(SOURCE_FEED_URL) as resp:
+def fetch_season_episodes() -> list[dict]:
+    with urllib.request.urlopen(FEED_URL) as resp:
         root = ET.fromstring(resp.read())
     episodes = []
     for item in root.find("channel").findall("item"):
         ep_type = item.findtext("itunes:episodeType", namespaces=NS)
         season = item.findtext("itunes:season", namespaces=NS)
         episode = item.findtext("itunes:episode", namespaces=NS)
-        if ep_type != "full" or season != "1" or not episode:
+        if ep_type != "full" or season != str(SEASON) or not episode:
             continue
         enclosure = item.find("enclosure")
         episodes.append(
@@ -97,6 +130,28 @@ def fetch_season1_episodes() -> list[dict]:
         )
     episodes.sort(key=lambda e: e["episode"])
     return episodes
+
+
+def fetch_approx_durations(episodes: list[dict]):
+    """Fill in approx_duration (seconds) from itunes:duration for planning."""
+    with urllib.request.urlopen(FEED_URL) as resp:
+        root = ET.fromstring(resp.read())
+    by_ep = {}
+    for item in root.find("channel").findall("item"):
+        episode = item.findtext("itunes:episode", namespaces=NS)
+        if not episode:
+            continue
+        d = item.findtext("itunes:duration", namespaces=NS)
+        parts = [int(x) for x in d.split(":")]
+        if len(parts) == 3:
+            h, m, s = parts
+        elif len(parts) == 2:
+            h, m, s = 0, *parts
+        else:
+            h, m, s = 0, 0, parts[0]
+        by_ep[int(episode)] = h * 3600 + m * 60 + s
+    for ep in episodes:
+        ep["approx_duration"] = by_ep.get(ep["episode"], 0)
 
 
 # --------------------------------------------------------------------------
@@ -122,7 +177,7 @@ def download(url: str, dest: str):
         return
     tmp = dest + ".part"
     urllib.request.urlretrieve(url, tmp)
-    # These source mp3s carry an embedded cover-art image as a second
+    # Source mp3s often carry an embedded cover-art image as a second
     # (video) stream alongside the audio, and Yoto's own MP3 ingest
     # pipeline turned out to be unreliable for us regardless of how
     # carefully the mp3 was re-encoded (VBR headers, ID3 size, etc. all
@@ -199,15 +254,12 @@ def prepare_episode_tracks(ep: dict) -> list[dict]:
 # Icons
 # --------------------------------------------------------------------------
 
-ICON_DIR = os.path.join(WORK_DIR, "icons")
-
-
 def prepare_icon(card_index: int, episode_num: int, part: int | None) -> str:
     os.makedirs(ICON_DIR, exist_ok=True)
     suffix = f"_p{part}" if part else ""
     path = os.path.join(ICON_DIR, f"c{card_index:02d}_e{episode_num:02d}{suffix}.png")
     if not os.path.exists(path):
-        save_icon(SEASON, card_index, episode_num, path, part=part)
+        save_icon(SEASON, card_index, episode_num, path, part=part, palette=ICON_PALETTE)
     return path
 
 
@@ -230,28 +282,6 @@ def pack_into_cards(episodes: list[dict]) -> list[list[dict]]:
     if current:
         cards.append(current)
     return cards
-
-
-def fetch_approx_durations(episodes: list[dict]):
-    """Fill in approx_duration (seconds) from itunes:duration for planning."""
-    with urllib.request.urlopen(SOURCE_FEED_URL) as resp:
-        root = ET.fromstring(resp.read())
-    by_ep = {}
-    for item in root.find("channel").findall("item"):
-        episode = item.findtext("itunes:episode", namespaces=NS)
-        if not episode:
-            continue
-        d = item.findtext("itunes:duration", namespaces=NS)
-        parts = [int(x) for x in d.split(":")]
-        if len(parts) == 3:
-            h, m, s = parts
-        elif len(parts) == 2:
-            h, m, s = 0, *parts
-        else:
-            h, m, s = 0, 0, parts[0]
-        by_ep[int(episode)] = h * 3600 + m * 60 + s
-    for ep in episodes:
-        ep["approx_duration"] = by_ep.get(ep["episode"], 0)
 
 
 # --------------------------------------------------------------------------
@@ -279,9 +309,9 @@ def save_manifest(manifest: dict):
 
 def upload_track(client: YotoClient, local_track: dict, card_index: int, episode_num: int, manifest: dict) -> dict:
     # Icon prep/upload is independent of the audio cache below -- it has
-    # its own cache (manifest["icons"], keyed by icon filename) so a
-    # from-scratch icon redesign can be picked up on a re-run without
-    # needing to re-upload already-cached audio too.
+    # its own cache (manifest["icons"], keyed by icon filename) so an icon
+    # redesign can be picked up on a re-run without needing to re-upload
+    # already-cached audio too.
     icon_path = prepare_icon(card_index, episode_num, local_track["part"])
     icon_key = os.path.basename(icon_path)
     icon_media_id = manifest["icons"].get(icon_key)
@@ -391,7 +421,14 @@ def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep
 
 
 def main():
+    config = load_podcasts_config()
+
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--podcast", choices=sorted(config.keys()),
+                         help="Which podcast from podcasts.yaml to build.")
+    parser.add_argument("--season", type=int, help="Which season number to build (e.g. 1).")
+    parser.add_argument("--list-podcasts", action="store_true",
+                         help="List configured podcasts from podcasts.yaml and exit.")
     parser.add_argument("--dry-run", action="store_true", help="Print the card plan and exit; no downloads/uploads.")
     parser.add_argument("--force-login", action="store_true", help="Ignore any cached Yoto session and log in again.")
     parser.add_argument("--only-card", type=int, help="Only process this card number (1-based).")
@@ -405,9 +442,22 @@ def main():
                               "problem is specific to an existing card's update history.")
     args = parser.parse_args()
 
-    episodes = fetch_season1_episodes()
+    if args.list_podcasts:
+        for name, entry in sorted(config.items()):
+            seasons = sorted(entry.get("icon_palettes", {}).keys()) or ["(any, uses default_icon_palette)"]
+            print(f"  {name:10s} {entry['title']!r} -- configured seasons: {seasons}")
+        return
+
+    if not args.podcast:
+        parser.error("--podcast is required (see --list-podcasts for options)")
+    if not args.season:
+        parser.error("--season is required, e.g. --season 1")
+
+    configure_for_podcast(args.podcast, args.season, config)
+
+    episodes = fetch_season_episodes()
     fetch_approx_durations(episodes)
-    print(f"Found {len(episodes)} Season 1 full episodes.")
+    print(f"Found {len(episodes)} Season {SEASON} full episodes.")
 
     cards = pack_into_cards(episodes)
     print(f"Planned {len(cards)} card(s):")

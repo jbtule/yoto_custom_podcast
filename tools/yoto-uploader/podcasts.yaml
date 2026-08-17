@@ -1,0 +1,25 @@
+# Config for build_cards.py -- one entry per podcast this tool knows how
+# to build into Yoto MYO cards. Add a new entry to support a new show;
+# nothing in build_cards.py itself should need to change. Pick which
+# podcast+season to build with `--podcast <name> --season <N>`.
+#
+# Fields:
+#   title              Display name of the podcast. Card titles are
+#                       derived as "<title> — S<season> Card N (...)".
+#   feed_url           The podcast's RSS feed URL.
+#   icon_palettes      Maps season number -> palette name (see
+#                       icon_gen.py's PALETTES dict: original, cmyk,
+#                       cmyk_bright, warm, cool, pastel, neon, rainbow).
+#                       Giving each season its own palette makes cards
+#                       from different seasons visually distinct at a
+#                       glance. A season not listed here falls back to
+#                       default_icon_palette.
+#   default_icon_palette  Palette used for any season not in icon_palettes.
+
+titans:
+  title: "The Titans of All'Terra"
+  feed_url: "https://titansofallterra.libsyn.com/rss"
+  default_icon_palette: original
+  icon_palettes:
+    1: original
+    2: cool
