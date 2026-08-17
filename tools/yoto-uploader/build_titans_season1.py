@@ -278,16 +278,10 @@ def save_manifest(manifest: dict):
 # --------------------------------------------------------------------------
 
 def upload_track(client: YotoClient, local_track: dict, card_index: int, episode_num: int, manifest: dict) -> dict:
-    key = local_track["path"]
-    cached = manifest["episodes"].get(key)
-    if cached:
-        return cached
-
-    def progress(msg):
-        print(f"    {local_track['title']}: {msg}")
-
-    info = client.upload_audio(local_track["path"], on_progress=progress)
-
+    # Icon prep/upload is independent of the audio cache below -- it has
+    # its own cache (manifest["icons"], keyed by icon filename) so a
+    # from-scratch icon redesign can be picked up on a re-run without
+    # needing to re-upload already-cached audio too.
     icon_path = prepare_icon(card_index, episode_num, local_track["part"])
     icon_key = os.path.basename(icon_path)
     icon_media_id = manifest["icons"].get(icon_key)
@@ -295,6 +289,19 @@ def upload_track(client: YotoClient, local_track: dict, card_index: int, episode
         icon_media_id = client.upload_icon(icon_path, icon_key)
         manifest["icons"][icon_key] = icon_media_id
         save_manifest(manifest)
+
+    key = local_track["path"]
+    cached = manifest["episodes"].get(key)
+    if cached:
+        if cached.get("icon_media_id") != icon_media_id:
+            cached["icon_media_id"] = icon_media_id
+            save_manifest(manifest)
+        return cached
+
+    def progress(msg):
+        print(f"    {local_track['title']}: {msg}")
+
+    info = client.upload_audio(local_track["path"], on_progress=progress)
 
     channels = info.get("channels") or "stereo"
     channels = {1: "mono", 2: "stereo"}.get(channels, channels)  # API may return numeric channel counts
