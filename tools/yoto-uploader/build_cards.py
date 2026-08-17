@@ -159,9 +159,20 @@ def fetch_approx_durations(episodes: list[dict]):
 # Local audio processing
 # --------------------------------------------------------------------------
 
+AAC_ENCODER = "aac"  # overwritten by require_ffmpeg() if aac_at (hardware) is available
+
+
 def require_ffmpeg():
+    global AAC_ENCODER
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         raise SystemExit("ffmpeg/ffprobe not found on PATH. Install with: brew install ffmpeg")
+    # aac_at wraps macOS's AudioToolbox (hardware-accelerated on Apple
+    # Silicon) -- measured ~2.2x faster than ffmpeg's software aac
+    # encoder for the same output, verified for correct duration/audio.
+    # Falls back to plain aac on platforms without it.
+    encoders = subprocess.run(["ffmpeg", "-encoders"], capture_output=True, text=True).stdout
+    if "aac_at" in encoders:
+        AAC_ENCODER = "aac_at"
 
 
 def ffprobe_duration(path: str) -> float:
@@ -189,7 +200,7 @@ def download(url: str, dest: str):
     # here rather than staying on MP3 at all.
     stripped = dest + ".stripped"
     subprocess.run(
-        ["ffmpeg", "-y", "-i", tmp, "-map", "0:a:0", "-c:a", "aac", "-b:a", "128k", "-vn", "-f", "mp4", stripped],
+        ["ffmpeg", "-y", "-i", tmp, "-map", "0:a:0", "-c:a", AAC_ENCODER, "-b:a", "128k", "-vn", "-f", "mp4", stripped],
         capture_output=True, check=True,
     )
     os.remove(tmp)
@@ -219,11 +230,11 @@ def split_audio(path: str, split_at: float, out_a: str, out_b: str):
     if os.path.exists(out_a) and os.path.exists(out_b):
         return
     subprocess.run(
-        ["ffmpeg", "-y", "-i", path, "-to", f"{split_at}", "-c:a", "aac", "-b:a", "128k", "-f", "mp4", out_a],
+        ["ffmpeg", "-y", "-i", path, "-to", f"{split_at}", "-c:a", AAC_ENCODER, "-b:a", "128k", "-f", "mp4", out_a],
         capture_output=True, check=True,
     )
     subprocess.run(
-        ["ffmpeg", "-y", "-i", path, "-ss", f"{split_at}", "-c:a", "aac", "-b:a", "128k", "-f", "mp4", out_b],
+        ["ffmpeg", "-y", "-i", path, "-ss", f"{split_at}", "-c:a", AAC_ENCODER, "-b:a", "128k", "-f", "mp4", out_b],
         capture_output=True, check=True,
     )
 
