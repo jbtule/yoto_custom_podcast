@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import urllib.request
@@ -184,11 +185,54 @@ def ffprobe_duration(path: str) -> float:
     return float(out.stdout.strip())
 
 
-def download(url: str, dest: str):
+def _download_progress_hook(label: str):
+    last_shown = -1
+
+    def hook(block_count: int, block_size: int, total_size: int):
+        nonlocal last_shown
+        if total_size <= 0:
+            return
+        pct = min(100, block_count * block_size * 100 // total_size)
+        if pct != last_shown and pct % 10 == 0:
+            mb = block_count * block_size / 1024 / 1024
+            total_mb = total_size / 1024 / 1024
+            print(f"    {label}: downloading... {pct}% ({mb:.0f}/{total_mb:.0f}MB)", end="\r", flush=True)
+            last_shown = pct
+
+    return hook
+
+
+_FFMPEG_TIME_RE = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
+
+
+def _run_ffmpeg_with_progress(cmd: list[str], total_duration: float, label: str, step: str):
+    """Run an ffmpeg command, printing periodic progress parsed from its
+    stderr `time=` lines instead of blocking silently for a minute-plus."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, bufsize=1)
+    last_shown = -1
+    stderr_lines = []
+    for line in proc.stderr:
+        stderr_lines.append(line)
+        m = _FFMPEG_TIME_RE.search(line)
+        if m and total_duration > 0:
+            h, mnt, s = m.groups()
+            elapsed = int(h) * 3600 + int(mnt) * 60 + float(s)
+            pct = min(100, int(elapsed / total_duration * 100))
+            if pct != last_shown and pct % 10 == 0:
+                print(f"    {label}: {step}... {pct}%", end="\r", flush=True)
+                last_shown = pct
+    proc.wait()
+    print(" " * 60, end="\r")
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, output="".join(stderr_lines))
+
+
+def download(url: str, dest: str, label: str = ""):
     if os.path.exists(dest):
         return
     tmp = dest + ".part"
-    urllib.request.urlretrieve(url, tmp)
+    urllib.request.urlretrieve(url, tmp, reporthook=_download_progress_hook(label))
+    print(" " * 60, end="\r")
     # Source mp3s often carry an embedded cover-art image as a second
     # (video) stream alongside the audio, and Yoto's own MP3 ingest
     # pipeline turned out to be unreliable for us regardless of how
@@ -198,10 +242,11 @@ def download(url: str, dest: str):
     # Confirmed via direct A/B test that the same audio re-encoded as
     # M4A/AAC uploads and plays correctly, so we convert straight to M4A
     # here rather than staying on MP3 at all.
+    raw_duration = ffprobe_duration(tmp)
     stripped = dest + ".stripped"
-    subprocess.run(
+    _run_ffmpeg_with_progress(
         ["ffmpeg", "-y", "-i", tmp, "-map", "0:a:0", "-c:a", AAC_ENCODER, "-b:a", "128k", "-vn", "-f", "mp4", stripped],
-        capture_output=True, check=True,
+        raw_duration, label, "encoding",
     )
     os.remove(tmp)
     os.rename(stripped, dest)
@@ -226,16 +271,16 @@ def find_split_point(path: str, duration: float) -> float:
     return best if best is not None else midpoint
 
 
-def split_audio(path: str, split_at: float, out_a: str, out_b: str):
+def split_audio(path: str, split_at: float, out_a: str, out_b: str, duration: float, label: str = ""):
     if os.path.exists(out_a) and os.path.exists(out_b):
         return
-    subprocess.run(
+    _run_ffmpeg_with_progress(
         ["ffmpeg", "-y", "-i", path, "-to", f"{split_at}", "-c:a", AAC_ENCODER, "-b:a", "128k", "-f", "mp4", out_a],
-        capture_output=True, check=True,
+        split_at, label, "splitting (part 1)",
     )
-    subprocess.run(
+    _run_ffmpeg_with_progress(
         ["ffmpeg", "-y", "-i", path, "-ss", f"{split_at}", "-c:a", AAC_ENCODER, "-b:a", "128k", "-f", "mp4", out_b],
-        capture_output=True, check=True,
+        duration - split_at, label, "splitting (part 2)",
     )
 
 
@@ -243,8 +288,9 @@ def prepare_episode_tracks(ep: dict) -> list[dict]:
     """Download an episode and return 1-2 local track dicts (title, path, part)."""
     os.makedirs(WORK_DIR, exist_ok=True)
     base = f"ep{ep['episode']:02d}"
+    label = f"Episode {ep['episode']}"
     raw_path = os.path.join(WORK_DIR, base + ".m4a")
-    download(ep["audio_url"], raw_path)
+    download(ep["audio_url"], raw_path, label=label)
     duration = ffprobe_duration(raw_path)
 
     if duration <= SPLIT_THRESHOLD_SEC:
@@ -253,7 +299,7 @@ def prepare_episode_tracks(ep: dict) -> list[dict]:
     split_at = find_split_point(raw_path, duration)
     part_a = os.path.join(WORK_DIR, base + "a.m4a")
     part_b = os.path.join(WORK_DIR, base + "b.m4a")
-    split_audio(raw_path, split_at, part_a, part_b)
+    split_audio(raw_path, split_at, part_a, part_b, duration, label=label)
     dur_a = ffprobe_duration(part_a)
     dur_b = ffprobe_duration(part_b)
     return [
