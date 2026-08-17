@@ -420,9 +420,11 @@ def upload_track(client: YotoClient, local_track: dict, card_index: int, episode
         return cached
 
     def progress(msg):
-        print(f"    {local_track['title']}: {msg}")
+        line = f"    {local_track['title']}: {msg}"
+        print(line.ljust(90), end="\r", flush=True)
 
     info = client.upload_audio(local_track["path"], on_progress=progress)
+    print(" " * 90, end="\r")
 
     channels = info.get("channels") or "stereo"
     channels = {1: "mono", 2: "stereo"}.get(channels, channels)  # API may return numeric channel counts

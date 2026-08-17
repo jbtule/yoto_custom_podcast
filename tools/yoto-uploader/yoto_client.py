@@ -63,7 +63,7 @@ class YotoClient:
             )
             put_resp.raise_for_status()
             if on_progress:
-                on_progress("uploaded, transcoding...")
+                on_progress("uploaded, waiting for status...")
         else:
             if on_progress:
                 on_progress("already on Yoto's servers (dedup by checksum)")
