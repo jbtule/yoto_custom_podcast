@@ -15,9 +15,9 @@ Adapted for this project's layout, which differs from the source tool's
                 for seasons). Assumes single-digit season and card numbers
                 (true for how many cards a season ever splits into here).
   Row 2 (y=9):  "E" + 2-digit episode number, in white.
-  Bottom row:   split-episode progress marker, in amber -- a half-width
-                line for the first half, a full-width line for the second
-                half. Unsplit episodes have no line at all.
+  Bottom row:   split-episode marker, in amber -- blank for the first half
+                (looks the same as an unsplit episode), a half-width line
+                for the second half.
 
 16x16, transparent background (Yoto's own recommendation -- avoid pure
 black, which won't show on the player's screen).
@@ -101,8 +101,8 @@ def generate_icon(season: int, card_num: int, episode_num: int, part: int | None
     """Build one 16x16 RGBA icon.
 
     part: None for a whole/unsplit episode, or 1/2 to mark which half of a
-    split episode this track is -- 1 gets a half-width amber line along the
-    bottom row, 2 gets a full-width one.
+    split episode this track is -- 1 looks the same as unsplit (blank), 2
+    gets a half-width amber line along the bottom row.
     """
     img = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
     pixels = img.load()
@@ -110,11 +110,8 @@ def generate_icon(season: int, card_num: int, episode_num: int, part: int | None
     _draw_season_card_line(pixels, season, card_num, 2, card_color(card_num))
     _draw_line(pixels, "E", episode_num, 9, (255, 255, 255, 255))
 
-    if part == 1:
+    if part == 2:
         for x in range(0, 8):
-            pixels[x, 15] = PART_MARKER_COLOR
-    elif part == 2:
-        for x in range(0, 16):
             pixels[x, 15] = PART_MARKER_COLOR
 
     return img
