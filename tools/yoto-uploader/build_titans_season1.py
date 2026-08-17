@@ -122,9 +122,17 @@ def download(url: str, dest: str):
     # transcoder -- a multi-stream file is at best noise for local
     # tooling (it tripped up a naive ffmpeg volume check) and at worst a
     # plausible cause of Yoto-side transcode weirdness on some episodes.
+    #
+    # Re-encode rather than stream-copy (-c:a copy): a copy just carries
+    # raw frames through with no regenerated Xing/LAME VBR header, and
+    # confirmed via `xxd`/byte search that our stream-copied files had no
+    # Xing/Info/VBRI header at all -- including *unsplit* episodes, which
+    # also failed to play (10s then silence) even uploaded standalone
+    # through the official Yoto app, unrelated to our API/split code
+    # entirely. Re-encoding writes a correct, standard header.
     stripped = dest + ".stripped"
     subprocess.run(
-        ["ffmpeg", "-y", "-i", tmp, "-map", "0:a:0", "-c:a", "copy", "-vn", "-f", "mp3", stripped],
+        ["ffmpeg", "-y", "-i", tmp, "-map", "0:a:0", "-c:a", "libmp3lame", "-q:a", "2", "-vn", "-f", "mp3", stripped],
         capture_output=True, check=True,
     )
     os.remove(tmp)
@@ -153,12 +161,14 @@ def find_split_point(path: str, duration: float) -> float:
 def split_audio(path: str, split_at: float, out_a: str, out_b: str):
     if os.path.exists(out_a) and os.path.exists(out_b):
         return
+    # Re-encode (not -c copy) so each half gets its own correct, freshly
+    # generated Xing/LAME VBR header reflecting its actual new duration.
     subprocess.run(
-        ["ffmpeg", "-y", "-i", path, "-to", f"{split_at}", "-c", "copy", out_a],
+        ["ffmpeg", "-y", "-i", path, "-to", f"{split_at}", "-c:a", "libmp3lame", "-q:a", "2", "-f", "mp3", out_a],
         capture_output=True, check=True,
     )
     subprocess.run(
-        ["ffmpeg", "-y", "-i", path, "-ss", f"{split_at}", "-c", "copy", out_b],
+        ["ffmpeg", "-y", "-i", path, "-ss", f"{split_at}", "-c:a", "libmp3lame", "-q:a", "2", "-f", "mp3", out_b],
         capture_output=True, check=True,
     )
 
