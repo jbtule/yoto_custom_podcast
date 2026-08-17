@@ -24,7 +24,7 @@ black, which won't show on the player's screen).
 """
 from __future__ import annotations
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 # 3x5 bitmap font -- each entry is 5 rows x 3 cols of 0/1.
 FONT: dict[str, list[list[int]]] = {
@@ -171,3 +171,43 @@ def generate_icon(season: int, card_num: int, episode_num: int, part: int | None
 def save_icon(season: int, card_num: int, episode_num: int, path: str, part: int | None = None,
               palette: str = DEFAULT_PALETTE):
     generate_icon(season, card_num, episode_num, part=part, palette=palette).save(path, "PNG")
+
+
+def render_badge(season: int, card_num: int, palette: str = DEFAULT_PALETTE, scale: int = 8) -> Image.Image:
+    """Render "S<season>.<card>" as a badge for compositing onto cover
+    art: pixel-font text at `scale`x, on a rounded semi-opaque dark chip
+    so it stays legible over arbitrary artwork."""
+    text_w, text_h = 15, 5  # matches _draw_season_card_line's 4-glyph layout
+    small = Image.new("RGBA", (text_w, text_h), (0, 0, 0, 0))
+    pixels = small.load()
+    _draw_season_card_line(pixels, season, card_num, 0, card_color(card_num, palette))
+    big_text = small.resize((text_w * scale, text_h * scale), resample=Image.NEAREST)
+
+    pad = scale
+    badge_w, badge_h = big_text.width + pad * 2, big_text.height + pad * 2
+    chip = Image.new("RGBA", (badge_w, badge_h), (17, 17, 17, 210))
+    mask = Image.new("L", (badge_w, badge_h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, badge_w - 1, badge_h - 1], radius=pad, fill=255)
+    badge = Image.new("RGBA", (badge_w, badge_h), (0, 0, 0, 0))
+    badge = Image.composite(chip, badge, mask)
+    badge.paste(big_text, (pad, pad), big_text)
+    return badge
+
+
+def apply_cover_badge(cover: Image.Image, season: int, card_num: int, palette: str = DEFAULT_PALETTE) -> Image.Image:
+    """Return a copy of `cover` with a season.card badge composited on.
+
+    Placed horizontally centered, near the bottom: the app is known to
+    crop the cover's left/right edges to a narrower (portrait) shape for
+    display, keeping full height, so a centered-low badge stays inside
+    the visible area regardless of exactly how wide that crop ends up.
+    """
+    cover = cover.convert("RGBA")
+    scale = max(4, cover.width // 140)
+    badge = render_badge(season, card_num, palette=palette, scale=scale)
+    margin = badge.height // 2
+    x = (cover.width - badge.width) // 2
+    y = cover.height - badge.height - margin
+    out = cover.copy()
+    out.alpha_composite(badge, (x, y))
+    return out

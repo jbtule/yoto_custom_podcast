@@ -51,8 +51,9 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 import yaml
+from PIL import Image
 
-from icon_gen import save_icon
+from icon_gen import apply_cover_badge, save_icon
 from yoto_auth import get_access_token
 from yoto_client import YotoClient
 
@@ -263,6 +264,29 @@ def prepare_icon(card_index: int, episode_num: int, part: int | None) -> str:
     return path
 
 
+def prepare_base_cover_image(source_url: str) -> str:
+    """Download the podcast's own cover art once, cached locally."""
+    path = os.path.join(WORK_DIR, "cover_base.png")
+    if not os.path.exists(path):
+        tmp = path + ".part"
+        urllib.request.urlretrieve(source_url, tmp)
+        Image.open(tmp).convert("RGB").save(path, "PNG")
+        os.remove(tmp)
+    return path
+
+
+def prepare_card_cover(card_index: int, base_cover_path: str) -> str:
+    """Composite this card's S<season>.<card> badge onto a copy of the
+    base cover art. See icon_gen.apply_cover_badge for placement notes
+    (the app crops covers to a narrower portrait shape for display)."""
+    path = os.path.join(WORK_DIR, f"cover_card{card_index:02d}.png")
+    if not os.path.exists(path):
+        base = Image.open(base_cover_path)
+        badged = apply_cover_badge(base, SEASON, card_index, palette=ICON_PALETTE)
+        badged.convert("RGB").save(path, "PNG")
+    return path
+
+
 # --------------------------------------------------------------------------
 # Card packing (planning only -- uses feed-reported size/duration, which is
 # what the real audio matches closely enough to plan card boundaries with)
@@ -293,8 +317,9 @@ def load_manifest() -> dict:
         with open(MANIFEST_PATH) as f:
             manifest = json.load(f)
         manifest.setdefault("icons", {})
+        manifest.setdefault("cover_urls", {})
         return manifest
-    return {"episodes": {}, "cards": {}, "icons": {}}
+    return {"episodes": {}, "cards": {}, "icons": {}, "cover_urls": {}}
 
 
 def save_manifest(manifest: dict):
@@ -476,14 +501,13 @@ def main():
     token = get_access_token(force_login=args.force_login)
     client = YotoClient(token)
 
-    cover_url = manifest.get("cover_url")
-    if not cover_url:
-        source_image_url = fetch_channel_image_url()
-        if source_image_url:
-            print(f"Uploading podcast cover art from {source_image_url} ...")
-            cover_url = client.upload_cover_image(source_image_url)
-            manifest["cover_url"] = cover_url
-            save_manifest(manifest)
+    base_cover_path = None
+    source_image_url = fetch_channel_image_url()
+    if source_image_url:
+        print(f"Fetching podcast cover art from {source_image_url} ...")
+        base_cover_path = prepare_base_cover_image(source_image_url)
+
+    manifest.setdefault("cover_urls", {})
 
     for i, card in enumerate(cards, start=1):
         if args.only_card and i != args.only_card:
@@ -506,6 +530,14 @@ def main():
                 upload_track(client, t, i, ep["episode"], manifest)
                 for t in local_tracks_by_ep[ep["episode"]]
             ]
+
+        cover_url = manifest["cover_urls"].get(card_key)
+        if not cover_url and base_cover_path:
+            print(f"  Uploading cover art badged 'S{SEASON}.{i}'...")
+            card_cover_path = prepare_card_cover(i, base_cover_path)
+            cover_url = client.upload_cover_image_file(card_cover_path)
+            manifest["cover_urls"][card_key] = cover_url
+            save_manifest(manifest)
 
         title_suffix = " [TEST]" if args.as_new_card else ""
         content = build_card_content(i, card, uploaded_tracks_by_ep, cover_url, existing_card_id, title_suffix)

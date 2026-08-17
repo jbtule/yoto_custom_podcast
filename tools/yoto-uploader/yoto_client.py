@@ -168,3 +168,21 @@ class YotoClient:
         _debug("upload_cover_image response", body)
         cover = body.get("coverImage", body)
         return cover.get("mediaUrl") or cover.get("media_url")
+
+    def upload_cover_image_file(self, png_path: str) -> str:
+        """Upload a local cover image file's bytes directly (for a
+        per-card composited cover, as opposed to fetching a shared URL
+        server-side). Returns the mediaUrl for metadata.cover.imageL."""
+        with open(png_path, "rb") as f:
+            data = f.read()
+        resp = self.session.post(
+            f"{API_BASE}/media/coverImage/user/me/upload",
+            params={"autoconvert": "true"},
+            headers={"Content-Type": "image/png"},
+            data=data,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        _debug("upload_cover_image_file response", body)
+        cover = body.get("coverImage", body)
+        return cover.get("mediaUrl") or cover.get("media_url")

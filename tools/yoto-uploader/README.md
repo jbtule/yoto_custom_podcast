@@ -85,12 +85,20 @@ the bottom row; the first half looks the same as an unsplit episode
 
 ## Cover art
 
-Each card's cover (`metadata.cover.imageL`) is set to the podcast's own
-artwork, fetched straight from the source feed's `<itunes:image>` URL and
-uploaded to Yoto once per podcast+season (Yoto fetches it server-side, no
-local download needed) via `POST /media/coverImage/user/me/upload`. The
-uploaded URL is cached in that season's manifest and reused for every
-card in it.
+Each card's cover (`metadata.cover.imageL`) is the podcast's own artwork
+(fetched from the source feed's `<itunes:image>` URL, downloaded once and
+cached locally) with that card's "S\<season>.\<card>" badge composited onto
+a copy of it -- same look as the track icons, so cards are identifiable
+from the cover alone in the Yoto app's card list, not just once you're
+browsing chapters. Each card's badged cover is a separate upload (via
+`POST /media/coverImage/user/me/upload`, raw file bytes this time rather
+than a shared URL), cached per-card in the manifest.
+
+The badge is placed horizontally centered, near the bottom: the app is
+known to crop covers to a narrower portrait shape for display (trimming
+left/right, keeping full height), so a centered-low badge stays inside
+the visible area regardless of exactly how wide that crop ends up -- see
+`icon_gen.apply_cover_badge`.
 
 ## Setup
 
