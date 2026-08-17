@@ -46,6 +46,15 @@ top-right corner as a "continued" marker; the first half and any unsplit
 episode have none. Icons are transparent-background PNGs (Yoto's own
 recommendation — pure black doesn't show on the player's screen).
 
+## Cover art
+
+Each card's cover (`metadata.cover.imageL`) is set to the podcast's own
+artwork, fetched straight from the source feed's `<itunes:image>` URL and
+uploaded to Yoto once (Yoto fetches it server-side, no local download
+needed) via `POST /media/coverImage/user/me/upload`. The uploaded URL is
+cached in the manifest and reused for every card, so it's only uploaded
+once per run of the whole season.
+
 ## Setup
 
 1. **ffmpeg**: `brew install ffmpeg` (needs `ffmpeg` and `ffprobe` on PATH).
@@ -80,6 +89,10 @@ python3 build_titans_season1.py
 
 # Only (re)do one card, e.g. after fixing something
 python3 build_titans_season1.py --only-card 3
+
+# Update an already-created card in place (e.g. it was made before cover
+# art was added) instead of skipping it or creating a duplicate
+python3 build_titans_season1.py --only-card 3 --force-recreate
 ```
 
 Cards appear under **My Cards** in the Yoto app once created; you still

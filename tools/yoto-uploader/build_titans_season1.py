@@ -62,6 +62,13 @@ CARD_TITLE_PREFIX = "The Titans of All'Terra — S1"
 # Source feed
 # --------------------------------------------------------------------------
 
+def fetch_channel_image_url() -> str | None:
+    with urllib.request.urlopen(SOURCE_FEED_URL) as resp:
+        root = ET.fromstring(resp.read())
+    image = root.find("channel").find("image")
+    return image.findtext("url") if image is not None else None
+
+
 def fetch_season1_episodes() -> list[dict]:
     with urllib.request.urlopen(SOURCE_FEED_URL) as resp:
         root = ET.fromstring(resp.read())
@@ -284,7 +291,8 @@ def upload_track(client: YotoClient, local_track: dict, card_index: int, episode
     return track
 
 
-def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep: dict) -> dict:
+def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep: dict, cover_url: str | None,
+                        existing_card_id: str | None = None) -> dict:
     chapters = []
     for i, ep in enumerate(episodes, start=1):
         tracks = local_tracks_by_ep[ep["episode"]]
@@ -314,14 +322,20 @@ def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep
             }
         )
     first_ep, last_ep = episodes[0]["episode"], episodes[-1]["episode"]
-    return {
+    metadata = {"category": "podcast", "languages": ["en"]}
+    if cover_url:
+        metadata["cover"] = {"imageL": cover_url}
+    payload = {
         "title": f"{CARD_TITLE_PREFIX} Card {card_index} (Episodes {first_ep}-{last_ep})",
         "content": {
             "chapters": chapters,
             "playbackType": "linear",
         },
-        "metadata": {"category": "stories", "languages": ["en"]},
+        "metadata": metadata,
     }
+    if existing_card_id:
+        payload["cardId"] = existing_card_id
+    return payload
 
 
 def main():
@@ -329,6 +343,9 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Print the card plan and exit; no downloads/uploads.")
     parser.add_argument("--force-login", action="store_true", help="Ignore any cached Yoto session and log in again.")
     parser.add_argument("--only-card", type=int, help="Only process this card number (1-based).")
+    parser.add_argument("--force-recreate", action="store_true",
+                         help="Re-run an already-created card (e.g. --only-card 3), updating it in "
+                              "place via its existing cardId instead of skipping or duplicating it.")
     args = parser.parse_args()
 
     episodes = fetch_season1_episodes()
@@ -352,12 +369,22 @@ def main():
     token = get_access_token(force_login=args.force_login)
     client = YotoClient(token)
 
+    cover_url = manifest.get("cover_url")
+    if not cover_url:
+        source_image_url = fetch_channel_image_url()
+        if source_image_url:
+            print(f"Uploading podcast cover art from {source_image_url} ...")
+            cover_url = client.upload_cover_image(source_image_url)
+            manifest["cover_url"] = cover_url
+            save_manifest(manifest)
+
     for i, card in enumerate(cards, start=1):
         if args.only_card and i != args.only_card:
             continue
         card_key = str(i)
-        if card_key in manifest["cards"]:
-            print(f"Card {i} already created: {manifest['cards'][card_key]['cardId']} -- skipping.")
+        existing_card_id = manifest["cards"].get(card_key, {}).get("cardId")
+        if existing_card_id and not args.force_recreate:
+            print(f"Card {i} already created: {existing_card_id} -- skipping.")
             continue
 
         print(f"\n=== Card {i}: episodes {card[0]['episode']}-{card[-1]['episode']} ===")
@@ -373,7 +400,7 @@ def main():
                 for t in local_tracks_by_ep[ep["episode"]]
             ]
 
-        content = build_card_content(i, card, uploaded_tracks_by_ep)
+        content = build_card_content(i, card, uploaded_tracks_by_ep, cover_url, existing_card_id)
         print(f"  Creating card '{content['title']}'...")
         result = client.create_or_update_content(content)
         card_id = result.get("cardId") or result.get("card", {}).get("cardId")

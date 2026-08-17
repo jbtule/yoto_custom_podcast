@@ -151,3 +151,16 @@ class YotoClient:
         _debug("upload_icon response", body)
         icon = body.get("displayIcon", body)
         return icon["mediaId"]
+
+    def upload_cover_image(self, image_url: str) -> str:
+        """Have Yoto fetch and host a cover image from a URL. Returns the
+        mediaUrl to set as a card's metadata.cover.imageL."""
+        resp = self.session.post(
+            f"{API_BASE}/media/coverImage/user/me/upload",
+            params={"imageUrl": image_url, "autoconvert": "true"},
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        _debug("upload_cover_image response", body)
+        cover = body.get("coverImage", body)
+        return cover.get("mediaUrl") or cover.get("media_url")
