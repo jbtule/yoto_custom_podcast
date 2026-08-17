@@ -59,7 +59,7 @@ class YotoClient:
             put_resp = requests.put(
                 upload_url,
                 data=data,
-                headers={"Content-Type": "audio/mpeg"},
+                headers={"Content-Type": "audio/mp4"},
             )
             put_resp.raise_for_status()
             if on_progress:

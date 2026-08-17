@@ -11,8 +11,14 @@ no 25-track limit. Trades that for Yoto's own MYO limits instead:
                                    order.
 
 Each track also gets a custom 16x16 pixel icon (see icon_gen.py) showing
-its card number and episode number, e.g. "C03 / E18", with a small amber
-corner marker on the second half of a split episode.
+"S<season>.<card>" over the episode number, e.g. "S1.3 / E18", with an
+amber progress line along the bottom for split episodes (half-width for
+the first half, full-width for the second).
+
+Local audio is converted to M4A/AAC, not MP3 -- MP3 uploads proved
+unreliable through Yoto's own pipeline (confirmed via direct A/B test,
+unrelated to anything in this script's API usage). See README.md's "Why
+M4A/AAC, not MP3" section for the full story.
 
 Nothing this script downloads, uploads, or caches is committed to git --
 see .gitignore. Only your Yoto login token and a small manifest of what's
@@ -23,7 +29,7 @@ Usage:
     export YOTO_CLIENT_ID=<your client id from https://dashboard.yoto.dev/>
     python3 build_titans_season1.py --dry-run     # show the card plan only
     python3 build_titans_season1.py                # do it for real
-    python3 build_titans_season1.py --resume       # safe to re-run any time
+    python3 build_titans_season1.py                # safe to re-run any time
 
 Requires ffmpeg/ffprobe on PATH (`brew install ffmpeg`).
 """
@@ -116,23 +122,18 @@ def download(url: str, dest: str):
         return
     tmp = dest + ".part"
     urllib.request.urlretrieve(url, tmp)
-    # These mp3s carry an embedded cover-art image as a second (video)
-    # stream alongside the audio. Strip it down to audio-only before it
-    # goes anywhere near ffprobe/ffmpeg splitting or Yoto's own
-    # transcoder -- a multi-stream file is at best noise for local
-    # tooling (it tripped up a naive ffmpeg volume check) and at worst a
-    # plausible cause of Yoto-side transcode weirdness on some episodes.
-    #
-    # Re-encode rather than stream-copy (-c:a copy): a copy just carries
-    # raw frames through with no regenerated Xing/LAME VBR header, and
-    # confirmed via `xxd`/byte search that our stream-copied files had no
-    # Xing/Info/VBRI header at all -- including *unsplit* episodes, which
-    # also failed to play (10s then silence) even uploaded standalone
-    # through the official Yoto app, unrelated to our API/split code
-    # entirely. Re-encoding writes a correct, standard header.
+    # These source mp3s carry an embedded cover-art image as a second
+    # (video) stream alongside the audio, and Yoto's own MP3 ingest
+    # pipeline turned out to be unreliable for us regardless of how
+    # carefully the mp3 was re-encoded (VBR headers, ID3 size, etc. all
+    # checked out fine locally, but standalone-upload tests through the
+    # official Yoto app still played a few seconds then cut off/crashed).
+    # Confirmed via direct A/B test that the same audio re-encoded as
+    # M4A/AAC uploads and plays correctly, so we convert straight to M4A
+    # here rather than staying on MP3 at all.
     stripped = dest + ".stripped"
     subprocess.run(
-        ["ffmpeg", "-y", "-i", tmp, "-map", "0:a:0", "-c:a", "libmp3lame", "-q:a", "2", "-vn", "-f", "mp3", stripped],
+        ["ffmpeg", "-y", "-i", tmp, "-map", "0:a:0", "-c:a", "aac", "-b:a", "128k", "-vn", "-f", "mp4", stripped],
         capture_output=True, check=True,
     )
     os.remove(tmp)
@@ -161,14 +162,12 @@ def find_split_point(path: str, duration: float) -> float:
 def split_audio(path: str, split_at: float, out_a: str, out_b: str):
     if os.path.exists(out_a) and os.path.exists(out_b):
         return
-    # Re-encode (not -c copy) so each half gets its own correct, freshly
-    # generated Xing/LAME VBR header reflecting its actual new duration.
     subprocess.run(
-        ["ffmpeg", "-y", "-i", path, "-to", f"{split_at}", "-c:a", "libmp3lame", "-q:a", "2", "-f", "mp3", out_a],
+        ["ffmpeg", "-y", "-i", path, "-to", f"{split_at}", "-c:a", "aac", "-b:a", "128k", "-f", "mp4", out_a],
         capture_output=True, check=True,
     )
     subprocess.run(
-        ["ffmpeg", "-y", "-i", path, "-ss", f"{split_at}", "-c:a", "libmp3lame", "-q:a", "2", "-f", "mp3", out_b],
+        ["ffmpeg", "-y", "-i", path, "-ss", f"{split_at}", "-c:a", "aac", "-b:a", "128k", "-f", "mp4", out_b],
         capture_output=True, check=True,
     )
 
@@ -177,7 +176,7 @@ def prepare_episode_tracks(ep: dict) -> list[dict]:
     """Download an episode and return 1-2 local track dicts (title, path, part)."""
     os.makedirs(WORK_DIR, exist_ok=True)
     base = f"ep{ep['episode']:02d}"
-    raw_path = os.path.join(WORK_DIR, base + ".mp3")
+    raw_path = os.path.join(WORK_DIR, base + ".m4a")
     download(ep["audio_url"], raw_path)
     duration = ffprobe_duration(raw_path)
 
@@ -185,8 +184,8 @@ def prepare_episode_tracks(ep: dict) -> list[dict]:
         return [{"title": ep["title"], "path": raw_path, "duration": duration, "part": None}]
 
     split_at = find_split_point(raw_path, duration)
-    part_a = os.path.join(WORK_DIR, base + "a.mp3")
-    part_b = os.path.join(WORK_DIR, base + "b.mp3")
+    part_a = os.path.join(WORK_DIR, base + "a.m4a")
+    part_b = os.path.join(WORK_DIR, base + "b.m4a")
     split_audio(raw_path, split_at, part_a, part_b)
     dur_a = ffprobe_duration(part_a)
     dur_b = ffprobe_duration(part_b)
@@ -303,7 +302,7 @@ def upload_track(client: YotoClient, local_track: dict, card_index: int, episode
     track = {
         "title": local_track["title"],
         "trackUrl": f"yoto:#{info['transcodedSha256']}",
-        "format": info.get("format") or "mp3",
+        "format": info.get("format") or "aac",
         "duration": info.get("duration") or local_track["duration"],
         "fileSize": info.get("fileSize") or os.path.getsize(local_track["path"]),
         "channels": channels,
