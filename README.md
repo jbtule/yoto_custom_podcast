@@ -22,6 +22,9 @@ Each podcast gets its own folder under `podcasts/`.
 - [`podcasts/tales-of-bob`](podcasts/tales-of-bob) — *Tales of Bob*'s
   "Broken Tusk Rising" campaign (93 chapters), split into four feeds,
   side-content/one-shots excluded, in correct chapter order.
+- [`podcasts/sneak-attack`](podcasts/sneak-attack) — *Sneak Attack!*,
+  Season 1 (156 episodes), split into seven feeds, story episodes only,
+  in correct season order.
 
 ## Layout convention
 
