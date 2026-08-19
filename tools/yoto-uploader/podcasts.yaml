@@ -15,6 +15,15 @@
 #                       glance. A season not listed here falls back to
 #                       default_icon_palette.
 #   default_icon_palette  Palette used for any season not in icon_palettes.
+#   title_patterns      Optional. Maps season number -> a regex (one
+#                       capture group = episode number) matched against
+#                       episode titles, used INSTEAD of the feed's
+#                       itunes:season/itunes:episode tags for that season.
+#                       For shows whose season/episode tags are
+#                       inconsistent, missing, or mix in unrelated
+#                       content under the same season number (see
+#                       tales-of-bob below), this is the only reliable
+#                       way to build a clean episode sequence.
 
 titans:
   title: "The Titans of All'Terra"
@@ -23,3 +32,17 @@ titans:
   icon_palettes:
     1: original
     2: cool
+
+tales-of-bob:
+  title: "Tales of Bob"
+  feed_url: "https://feeds.simplecast.com/_6JPR3jO"
+  default_icon_palette: warm
+  icon_palettes:
+    1: warm
+  # "Season 1" here means the whole Broken Tusk Rising campaign (93
+  # chapters) -- there's no real season structure in this show, and the
+  # feed's actual season tags are unreliable/inconsistent (see
+  # podcasts/tales-of-bob/README.md for the full breakdown), so episodes
+  # are selected by title pattern instead.
+  title_patterns:
+    1: 'Broken Tusk Rising Chapter (\d+) \[Pathfinder 2E\]'

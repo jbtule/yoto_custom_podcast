@@ -76,6 +76,7 @@ FEED_URL: str = ""
 SEASON: int = 0
 CARD_TITLE_PREFIX: str = ""
 ICON_PALETTE: str = "original"
+TITLE_PATTERN: re.Pattern | None = None
 WORK_DIR: str = ""
 MANIFEST_PATH: str = ""
 ICON_DIR: str = ""
@@ -88,12 +89,14 @@ def load_podcasts_config() -> dict:
 
 def configure_for_podcast(short_name: str, season: int, config: dict):
     """Set the module-level config globals for the selected podcast+season."""
-    global FEED_URL, SEASON, CARD_TITLE_PREFIX, ICON_PALETTE, WORK_DIR, MANIFEST_PATH, ICON_DIR
+    global FEED_URL, SEASON, CARD_TITLE_PREFIX, ICON_PALETTE, TITLE_PATTERN, WORK_DIR, MANIFEST_PATH, ICON_DIR
     entry = config[short_name]
     FEED_URL = entry["feed_url"]
     SEASON = season
     CARD_TITLE_PREFIX = f"{entry['title']} — S{season}"
     ICON_PALETTE = entry.get("icon_palettes", {}).get(season, entry.get("default_icon_palette", "original"))
+    pattern_str = entry.get("title_patterns", {}).get(season)
+    TITLE_PATTERN = re.compile(pattern_str) if pattern_str else None
     state_key = f"{short_name}-s{season}"
     WORK_DIR = os.path.join(STATE_DIR, "work", state_key)
     MANIFEST_PATH = os.path.join(STATE_DIR, f"{state_key}-manifest.json")
@@ -111,39 +114,75 @@ def fetch_channel_image_url() -> str | None:
     return image.findtext("url") if image is not None else None
 
 
+def _episode_number_for_item(item: ET.Element) -> int | None:
+    """Pick out this item's episode number, two ways:
+
+    - Normally, the feed's own itunes:episode tag, restricted to items
+      tagged with the season we're building (itunes:season).
+    - If the podcast config set a title_patterns regex for this season
+      (see podcasts.yaml), match against the title instead and use the
+      pattern's one capture group as the episode number. For shows whose
+      season/episode tags are inconsistent or don't isolate the content
+      we actually want (e.g. Tales of Bob's "Broken Tusk Rising"
+      campaign spans several inconsistently-tagged/untagged "seasons"),
+      this is the only reliable way to build a clean episode sequence.
+    """
+    if TITLE_PATTERN:
+        m = TITLE_PATTERN.match(item.findtext("title") or "")
+        return int(m.group(1)) if m else None
+    season = item.findtext("itunes:season", namespaces=NS)
+    episode = item.findtext("itunes:episode", namespaces=NS)
+    if season != str(SEASON) or not episode:
+        return None
+    return int(episode)
+
+
 def fetch_season_episodes() -> list[dict]:
     with urllib.request.urlopen(FEED_URL) as resp:
         root = ET.fromstring(resp.read())
     episodes = []
     for item in root.find("channel").findall("item"):
         ep_type = item.findtext("itunes:episodeType", namespaces=NS)
-        season = item.findtext("itunes:season", namespaces=NS)
-        episode = item.findtext("itunes:episode", namespaces=NS)
-        if ep_type != "full" or season != str(SEASON) or not episode:
+        if ep_type != "full":
+            continue
+        episode_num = _episode_number_for_item(item)
+        if episode_num is None:
             continue
         enclosure = item.find("enclosure")
         episodes.append(
             {
-                "episode": int(episode),
+                "episode": episode_num,
                 "title": item.findtext("title"),
                 "audio_url": enclosure.get("url"),
-                "approx_size": int(enclosure.get("length", 0)),
+                "approx_size": int(enclosure.get("length") or 0),
             }
         )
     episodes.sort(key=lambda e: e["episode"])
     return episodes
 
 
+ESTIMATED_BYTES_PER_SEC = 16 * 1024  # ~128kbps -- what our own encode step actually produces
+
+
 def fetch_approx_durations(episodes: list[dict]):
-    """Fill in approx_duration (seconds) from itunes:duration for planning."""
+    """Fill in approx_duration (seconds) from itunes:duration for planning.
+
+    Also backfills approx_size for any episode whose feed-reported
+    enclosure length was 0 (some hosts, e.g. tracking-redirect URLs,
+    never populate a real size) -- estimated at the bitrate our own
+    encode step actually produces, which is what matters for planning
+    since we re-encode everything regardless of source bitrate.
+    """
     with urllib.request.urlopen(FEED_URL) as resp:
         root = ET.fromstring(resp.read())
     by_ep = {}
     for item in root.find("channel").findall("item"):
-        episode = item.findtext("itunes:episode", namespaces=NS)
-        if not episode:
+        episode_num = _episode_number_for_item(item)
+        if episode_num is None:
             continue
         d = item.findtext("itunes:duration", namespaces=NS)
+        if not d:
+            continue
         parts = [int(x) for x in d.split(":")]
         if len(parts) == 3:
             h, m, s = parts
@@ -151,9 +190,11 @@ def fetch_approx_durations(episodes: list[dict]):
             h, m, s = 0, *parts
         else:
             h, m, s = 0, 0, parts[0]
-        by_ep[int(episode)] = h * 3600 + m * 60 + s
+        by_ep[episode_num] = h * 3600 + m * 60 + s
     for ep in episodes:
         ep["approx_duration"] = by_ep.get(ep["episode"], 0)
+        if not ep["approx_size"]:
+            ep["approx_size"] = ep["approx_duration"] * ESTIMATED_BYTES_PER_SEC
 
 
 # --------------------------------------------------------------------------
