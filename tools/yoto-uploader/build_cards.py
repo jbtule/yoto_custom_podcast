@@ -328,6 +328,7 @@ def prepare_icon(card_index: int, episode_num: int, part: int | None) -> str:
 
 def prepare_base_cover_image(source_url: str) -> str:
     """Download the podcast's own cover art once, cached locally."""
+    os.makedirs(WORK_DIR, exist_ok=True)
     path = os.path.join(WORK_DIR, "cover_base.png")
     if not os.path.exists(path):
         downloading_tmp = os.path.join(WORK_DIR, "cover_base.download-tmp")
@@ -344,6 +345,7 @@ def prepare_card_cover(card_index: int, base_cover_path: str) -> str:
     display -- confirmed to trim left/right, keeping full height -- can't
     cut into the real art; the badge (icon_gen.apply_cover_badge) then
     goes near the top of that padded canvas."""
+    os.makedirs(WORK_DIR, exist_ok=True)
     path = os.path.join(WORK_DIR, f"cover_card{card_index:02d}.png")
     if not os.path.exists(path):
         base = Image.open(base_cover_path)
