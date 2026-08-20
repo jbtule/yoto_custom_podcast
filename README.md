@@ -29,6 +29,10 @@ Each podcast gets its own folder under `podcasts/`.
   *Dungeons & Dragons & Daughters*, Campaign 1 (70 chapters, complete),
   split into three feeds, bonus/recap episodes and the ongoing Campaign 2
   excluded, in correct chapter order.
+- [`podcasts/stinky-dragon`](podcasts/stinky-dragon) — *Tales from the
+  Stinky Dragon*, Campaigns 1 & 2 (86 + 50 episodes, both complete),
+  split into six feeds, interludes/bonus/one-shots and the ongoing
+  Campaign 3 excluded, in correct episode order.
 
 ## Layout convention
 
