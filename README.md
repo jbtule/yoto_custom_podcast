@@ -25,6 +25,10 @@ Each podcast gets its own folder under `podcasts/`.
 - [`podcasts/sneak-attack`](podcasts/sneak-attack) — *Sneak Attack!*,
   Season 1 (156 episodes), split into seven feeds, story episodes only,
   in correct season order.
+- [`podcasts/dungeons-dragons-daughters`](podcasts/dungeons-dragons-daughters) —
+  *Dungeons & Dragons & Daughters*, Campaign 1 (70 chapters, complete),
+  split into three feeds, bonus/recap episodes and the ongoing Campaign 2
+  excluded, in correct chapter order.
 
 ## Layout convention
 
