@@ -49,6 +49,31 @@ distinct at a glance; any season not listed falls back to
 `default_icon_palette`. Nothing in `build_cards.py` is podcast-specific —
 see `python3 build_cards.py --list-podcasts` to check your entry parses.
 
+### Pointing at our own `podcasts/` RSS feeds instead of the original
+
+If this show already has custom RSS feeds under `podcasts/<slug>/feeds/`
+(see `.claude/skills/add-rss-feed`), point this tool at those instead of
+the original host feed via `local_feed_paths` — repo-relative paths to
+every part for a season, merged at fetch time:
+
+```yaml
+  local_feed_paths:
+    1:
+      - "podcasts/my-show/feeds/season1-part1.xml"
+      - "podcasts/my-show/feeds/season1-part2.xml"
+```
+
+Those feeds are already filtered to just the right episodes (no bonus/
+interlude/side-content — whatever filtering the RSS side needed, title
+regex or otherwise) and reordered, so there's no need to re-derive any of
+that here. It's also more robust: zero dependency on the original host
+feed staying up or unchanged, and zero network calls to it (verified —
+`episodes`, `durations`, and `cover_url` all come from the local files).
+`title_patterns`/season-tag matching still applies on top, since our
+generated feeds preserve each item's original tags/title unchanged —
+only which *episodes are present* was decided at RSS-build time, not how
+to read an episode number back out of one.
+
 ## Why M4A/AAC, not MP3
 
 Local audio is converted to M4A/AAC, not MP3. This isn't a style choice --

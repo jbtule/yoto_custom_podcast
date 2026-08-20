@@ -61,6 +61,7 @@ from yoto_client import YotoClient
 NS = {"itunes": "http://www.itunes.com/dtds/podcast-1.0.dtd"}
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(os.path.dirname(HERE))  # tools/yoto-uploader -> repo root
 STATE_DIR = os.path.join(HERE, ".state")
 PODCASTS_CONFIG_PATH = os.path.join(HERE, "podcasts.yaml")
 
@@ -77,6 +78,7 @@ SEASON: int = 0
 CARD_TITLE_PREFIX: str = ""
 ICON_PALETTE: str = "original"
 TITLE_PATTERN: re.Pattern | None = None
+LOCAL_FEED_PATHS: list[str] = []
 WORK_DIR: str = ""
 MANIFEST_PATH: str = ""
 ICON_DIR: str = ""
@@ -89,7 +91,9 @@ def load_podcasts_config() -> dict:
 
 def configure_for_podcast(short_name: str, season: int, config: dict):
     """Set the module-level config globals for the selected podcast+season."""
-    global FEED_URL, SEASON, CARD_TITLE_PREFIX, ICON_PALETTE, TITLE_PATTERN, WORK_DIR, MANIFEST_PATH, ICON_DIR
+    global FEED_URL, SEASON, CARD_TITLE_PREFIX, ICON_PALETTE, TITLE_PATTERN, LOCAL_FEED_PATHS
+    global WORK_DIR, MANIFEST_PATH, ICON_DIR, _source_cache
+    _source_cache = None
     entry = config[short_name]
     FEED_URL = entry["feed_url"]
     SEASON = season
@@ -97,6 +101,7 @@ def configure_for_podcast(short_name: str, season: int, config: dict):
     ICON_PALETTE = entry.get("icon_palettes", {}).get(season, entry.get("default_icon_palette", "original"))
     pattern_str = entry.get("title_patterns", {}).get(season)
     TITLE_PATTERN = re.compile(pattern_str) if pattern_str else None
+    LOCAL_FEED_PATHS = entry.get("local_feed_paths", {}).get(season, [])
     state_key = f"{short_name}-s{season}"
     WORK_DIR = os.path.join(STATE_DIR, "work", state_key)
     MANIFEST_PATH = os.path.join(STATE_DIR, f"{state_key}-manifest.json")
@@ -107,10 +112,45 @@ def configure_for_podcast(short_name: str, season: int, config: dict):
 # Source feed
 # --------------------------------------------------------------------------
 
+_source_cache: tuple[ET.Element, list[ET.Element]] | None = None
+
+
+def _fetch_channel_and_items() -> tuple[ET.Element, list[ET.Element]]:
+    """Fetch the source channel + all its items -- either the single
+    external FEED_URL, or (when podcasts.yaml configures local_feed_paths
+    for this season) our own already-filtered/reordered custom RSS feed
+    parts from podcasts/<slug>/feeds/, merged. Using our own feeds avoids
+    re-deriving the same season-tag-unreliability workarounds twice (the
+    filtering already happened when those feeds were built) and is more
+    robust -- no dependency on the original host feed staying up or
+    unchanged. Cached per process since this is called from multiple
+    places.
+    """
+    global _source_cache
+    if _source_cache is not None:
+        return _source_cache
+
+    if LOCAL_FEED_PATHS:
+        channel = None
+        items = []
+        for rel_path in LOCAL_FEED_PATHS:
+            part_channel = ET.parse(os.path.join(REPO_ROOT, rel_path)).getroot().find("channel")
+            if channel is None:
+                channel = part_channel
+            items.extend(part_channel.findall("item"))
+    else:
+        with urllib.request.urlopen(FEED_URL) as resp:
+            root = ET.fromstring(resp.read())
+        channel = root.find("channel")
+        items = channel.findall("item")
+
+    _source_cache = (channel, items)
+    return _source_cache
+
+
 def fetch_channel_image_url() -> str | None:
-    with urllib.request.urlopen(FEED_URL) as resp:
-        root = ET.fromstring(resp.read())
-    image = root.find("channel").find("image")
+    channel, _ = _fetch_channel_and_items()
+    image = channel.find("image")
     return image.findtext("url") if image is not None else None
 
 
@@ -138,10 +178,9 @@ def _episode_number_for_item(item: ET.Element) -> int | None:
 
 
 def fetch_season_episodes() -> list[dict]:
-    with urllib.request.urlopen(FEED_URL) as resp:
-        root = ET.fromstring(resp.read())
+    _, items = _fetch_channel_and_items()
     episodes = []
-    for item in root.find("channel").findall("item"):
+    for item in items:
         ep_type = item.findtext("itunes:episodeType", namespaces=NS)
         if ep_type != "full":
             continue
@@ -173,10 +212,9 @@ def fetch_approx_durations(episodes: list[dict]):
     encode step actually produces, which is what matters for planning
     since we re-encode everything regardless of source bitrate.
     """
-    with urllib.request.urlopen(FEED_URL) as resp:
-        root = ET.fromstring(resp.read())
+    _, items = _fetch_channel_and_items()
     by_ep = {}
-    for item in root.find("channel").findall("item"):
+    for item in items:
         episode_num = _episode_number_for_item(item)
         if episode_num is None:
             continue

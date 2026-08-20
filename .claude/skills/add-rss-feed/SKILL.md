@@ -16,7 +16,11 @@ workaround instead).
 
 This skill is for the `podcasts/` RSS-feed side only. `tools/yoto-uploader/`
 is a separate system (uploads audio directly into Yoto's MYO system) —
-out of scope here unless the user explicitly asks for it too.
+out of scope here unless the user explicitly asks for it too. That said,
+`tools/yoto-uploader/podcasts.yaml` supports a `local_feed_paths` field
+that points it at the RSS feeds built here instead of the original host
+feed (see that file's comments) — once you've built feeds for a show,
+wiring that up is cheap and worth doing/mentioning even if not asked.
 
 ## Step 1: Find the real RSS feed URL
 

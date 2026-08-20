@@ -6,7 +6,9 @@
 # Fields:
 #   title              Display name of the podcast. Card titles are
 #                       derived as "<title> — S<season> Card N (...)".
-#   feed_url           The podcast's RSS feed URL.
+#   feed_url           The podcast's original RSS feed URL. Still
+#                       required as a fallback/reference even when
+#                       local_feed_paths is set (see below).
 #   icon_palettes      Maps season number -> palette name (see
 #                       icon_gen.py's PALETTES dict: original, cmyk,
 #                       cmyk_bright, warm, cool, pastel, neon, rainbow).
@@ -23,7 +25,25 @@
 #                       inconsistent, missing, or mix in unrelated
 #                       content under the same season number (see
 #                       tales-of-bob below), this is the only reliable
-#                       way to build a clean episode sequence.
+#                       way to build a clean episode sequence. Still
+#                       needed even when local_feed_paths is set, since
+#                       our generated feeds preserve each item's
+#                       original itunes:season/episode tags unchanged --
+#                       filtering already happened at feed-build time,
+#                       but per-item episode *numbering* still comes
+#                       from wherever it reliably lives (title or tags).
+#   local_feed_paths    Optional. Maps season number -> a list of repo-
+#                       relative paths to this podcast's OWN generated
+#                       podcasts/<slug>/feeds/*.xml parts (see
+#                       .claude/skills/add-rss-feed). When set, these are
+#                       fetched and merged INSTEAD of feed_url -- they're
+#                       already filtered to just the right episodes (no
+#                       bonus/interlude/side-content) and reordered, so
+#                       there's no need to re-derive that here, and no
+#                       dependency on the original host feed staying up
+#                       or unchanged. List every part for the season/
+#                       campaign; order doesn't matter, episodes get
+#                       re-sorted by number regardless.
 
 titans:
   title: "The Titans of All'Terra"
@@ -32,6 +52,13 @@ titans:
   icon_palettes:
     1: original
     2: cool
+  local_feed_paths:
+    1:
+      - "podcasts/titans-of-allterra/feeds/season1-part1.xml"
+      - "podcasts/titans-of-allterra/feeds/season1-part2.xml"
+    2:
+      - "podcasts/titans-of-allterra/feeds/season2-part1.xml"
+      - "podcasts/titans-of-allterra/feeds/season2-part2.xml"
 
 tales-of-bob:
   title: "Tales of Bob"
@@ -46,3 +73,69 @@ tales-of-bob:
   # are selected by title pattern instead.
   title_patterns:
     1: 'Broken Tusk Rising Chapter (\d+) \[Pathfinder 2E\]'
+  local_feed_paths:
+    1:
+      - "podcasts/tales-of-bob/feeds/broken-tusk-rising-part1.xml"
+      - "podcasts/tales-of-bob/feeds/broken-tusk-rising-part2.xml"
+      - "podcasts/tales-of-bob/feeds/broken-tusk-rising-part3.xml"
+      - "podcasts/tales-of-bob/feeds/broken-tusk-rising-part4.xml"
+
+sneak-attack:
+  title: "Sneak Attack!"
+  feed_url: "https://sneakattack.libsyn.com/rss"
+  default_icon_palette: neon
+  icon_palettes:
+    1: neon
+  local_feed_paths:
+    1:
+      - "podcasts/sneak-attack/feeds/season1-part1.xml"
+      - "podcasts/sneak-attack/feeds/season1-part2.xml"
+      - "podcasts/sneak-attack/feeds/season1-part3.xml"
+      - "podcasts/sneak-attack/feeds/season1-part4.xml"
+      - "podcasts/sneak-attack/feeds/season1-part5.xml"
+      - "podcasts/sneak-attack/feeds/season1-part6.xml"
+      - "podcasts/sneak-attack/feeds/season1-part7.xml"
+
+dungeons-dragons-daughters:
+  title: "Dungeons & Dragons & Daughters"
+  feed_url: "https://feed.podbean.com/dungeonsdragonsdaughters/feed.xml"
+  default_icon_palette: pastel
+  icon_palettes:
+    1: pastel
+  # "Season 1" here means Campaign 1 (chapters 0-69, complete) -- almost
+  # none of this feed's items carry a usable itunes:season tag (see
+  # podcasts/dungeons-dragons-daughters/README.md), so episodes are
+  # selected by the leading chapter number in each title instead.
+  title_patterns:
+    1: '^(\d+)\.\s+DDD\s+.+$'
+  local_feed_paths:
+    1:
+      - "podcasts/dungeons-dragons-daughters/feeds/campaign1-part1.xml"
+      - "podcasts/dungeons-dragons-daughters/feeds/campaign1-part2.xml"
+      - "podcasts/dungeons-dragons-daughters/feeds/campaign1-part3.xml"
+
+stinky-dragon:
+  title: "Tales from the Stinky Dragon"
+  feed_url: "https://feeds.megaphone.fm/stinkydragon"
+  default_icon_palette: rainbow
+  icon_palettes:
+    1: rainbow
+    2: cmyk_bright
+  # "Season 1"/"Season 2" here mean Campaign 1 and Campaign 2 (86 + 50
+  # episodes, both complete) -- this feed's season tags mislabel a
+  # post-finale bonus mini-arc as part of Campaign 1's numbering and
+  # don't reliably cover Campaign 3 at all (see
+  # podcasts/stinky-dragon/README.md), so episodes are selected by each
+  # campaign's "C0N - Ep. NN - " title pattern instead.
+  title_patterns:
+    1: '^C01 - Ep\.\s*(\d+)\s*-'
+    2: '^C02 - Ep\.\s*(\d+)\s*-'
+  local_feed_paths:
+    1:
+      - "podcasts/stinky-dragon/feeds/campaign1-part1.xml"
+      - "podcasts/stinky-dragon/feeds/campaign1-part2.xml"
+      - "podcasts/stinky-dragon/feeds/campaign1-part3.xml"
+      - "podcasts/stinky-dragon/feeds/campaign1-part4.xml"
+    2:
+      - "podcasts/stinky-dragon/feeds/campaign2-part1.xml"
+      - "podcasts/stinky-dragon/feeds/campaign2-part2.xml"
