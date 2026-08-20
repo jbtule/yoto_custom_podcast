@@ -8,8 +8,9 @@ committed to git** — everything downloaded/uploaded lives in `.state/`,
 which is gitignored.
 
 Generic across podcasts/seasons -- add an entry to `podcasts.yaml` and
-run `build_cards.py --podcast <name> --season <N>`. Currently configured:
-**The Titans of All'Terra**, seasons 1 and 2.
+run `build_cards.py --podcast <name> --season <N>`. See
+[`PODCASTS.md`](PODCASTS.md) for what's currently configured (7
+podcast+season combos, ~557 hours, ~86 planned cards total).
 
 ## Why this exists / how it differs from the RSS approach
 
