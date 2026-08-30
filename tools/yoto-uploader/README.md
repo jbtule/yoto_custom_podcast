@@ -37,17 +37,16 @@ Add an entry to `podcasts.yaml`:
 my-show:
   title: "My Show"
   feed_url: "https://example.com/feed.rss"
-  default_icon_palette: original
-  icon_palettes:
-    1: original
-    2: cool
+  icon_palette: original
 ```
 
-`icon_palettes` maps season number to a named palette from `icon_gen.py`
-(`original`, `cmyk`, `cmyk_bright`, `warm`, `cool`, `pastel`, `neon`,
-`rainbow`) so different seasons of the same show read as visually
-distinct at a glance; any season not listed falls back to
-`default_icon_palette`. Nothing in `build_cards.py` is podcast-specific —
+`icon_palette` names one palette from `icon_gen.py` (`original`, `cmyk`,
+`cmyk_bright`, `warm`, `cool`, `pastel`, `neon`, `rainbow`) used for this
+show's cards. The season number indexes into that palette's color list
+(season 1 -> its first color, season 2 -> its second, ...), so different
+seasons of the same show still read as visually distinct at a glance,
+while different shows are distinct via their own palette. Defaults to
+`original` if omitted. Nothing in `build_cards.py` is podcast-specific —
 see `python3 build_cards.py --list-podcasts` to check your entry parses.
 
 ### Pointing at our own `podcasts/` RSS feeds instead of the original

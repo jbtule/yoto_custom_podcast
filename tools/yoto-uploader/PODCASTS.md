@@ -24,7 +24,7 @@ python3 -c "
 import build_cards as b
 config = b.load_podcasts_config()
 for name, entry in config.items():
-    for season in sorted(set(entry.get('icon_palettes', {})) | set(entry.get('local_feed_paths', {}))):
+    for season in sorted(entry.get('local_feed_paths', {})):
         b.configure_for_podcast(name, season, config)
         episodes = b.fetch_season_episodes()
         b.fetch_approx_durations(episodes)

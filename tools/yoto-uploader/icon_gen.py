@@ -10,12 +10,15 @@ Adapted for this project's layout, which differs from the source tool's
 *cards* (not seasons), and long episodes get split into two tracks:
 
   Row 1 (y=2):  "S1.3" -- season number, then card number, in one fixed
-                color for the whole season (whichever named palette the
-                podcast config picks for it -- different seasons/podcasts
-                look distinct from each other, but every card within one
-                season matches). Assumes single-digit season and card
-                numbers (true for how many cards a season ever splits
-                into here).
+                color for the whole season: the podcast config picks one
+                named palette per podcast, and the season number indexes
+                into that palette's color list (season 1 = colors[0],
+                season 2 = colors[1], ...), so every card within one
+                season matches, different seasons of the same podcast
+                are still distinct, and different podcasts read as
+                distinct via their own palette. Assumes single-digit
+                season and card numbers (true for how many cards a
+                season ever splits into here).
   Row 2 (y=9):  "E" + 2-digit episode number, in white.
   Bottom row:   split-episode marker, in amber -- blank for the first half
                 (looks the same as an unsplit episode), a half-width line
@@ -113,12 +116,15 @@ def _hex_to_rgba(hex_color: str) -> tuple[int, int, int, int]:
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), 255
 
 
-def season_color(palette: str = DEFAULT_PALETTE) -> tuple[int, int, int, int]:
+def season_color(palette: str, season: int) -> tuple[int, int, int, int]:
     """One fixed color for the whole season's labels -- consistent across
-    every card in that season (different seasons/podcasts still look
-    distinct from each other via their own configured palette)."""
+    every card in that season. `season` indexes into the podcast's own
+    palette (season 1 = colors[0], season 2 = colors[1], ...), wrapping
+    around via modulo if a podcast somehow runs past the palette's 20
+    colors, so different seasons of the same podcast are still visually
+    distinct from each other."""
     colors = PALETTES.get(palette, PALETTES[DEFAULT_PALETTE])
-    return _hex_to_rgba(colors[0])
+    return _hex_to_rgba(colors[(season - 1) % len(colors)])
 
 
 def _pad2(n: int) -> str:
@@ -157,13 +163,14 @@ def generate_icon(season: int, card_num: int, episode_num: int, part: int | None
     part: None for a whole/unsplit episode, or 1/2 to mark which half of a
     split episode this track is -- 1 looks the same as unsplit (blank), 2
     gets a half-width amber line along the bottom row.
-    palette: name of an entry in PALETTES; unknown names fall back to
-    DEFAULT_PALETTE.
+    palette: name of an entry in PALETTES (unknown names fall back to
+    DEFAULT_PALETTE); `season` picks which color within it (see
+    season_color).
     """
     img = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
     pixels = img.load()
 
-    _draw_season_card_line(pixels, season, card_num, 2, season_color(palette))
+    _draw_season_card_line(pixels, season, card_num, 2, season_color(palette, season))
     _draw_line(pixels, "E", episode_num, 9, (255, 255, 255, 255))
 
     if part == 2:
@@ -185,7 +192,7 @@ def render_badge(season: int, card_num: int, palette: str = DEFAULT_PALETTE, sca
     text_w, text_h = 15, 5  # matches _draw_season_card_line's 4-glyph layout
     small = Image.new("RGBA", (text_w, text_h), (0, 0, 0, 0))
     pixels = small.load()
-    _draw_season_card_line(pixels, season, card_num, 0, season_color(palette))
+    _draw_season_card_line(pixels, season, card_num, 0, season_color(palette, season))
     big_text = small.resize((text_w * scale, text_h * scale), resample=Image.NEAREST)
 
     pad = scale

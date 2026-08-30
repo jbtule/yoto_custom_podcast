@@ -98,7 +98,7 @@ def configure_for_podcast(short_name: str, season: int, config: dict):
     FEED_URL = entry["feed_url"]
     SEASON = season
     CARD_TITLE_PREFIX = f"{entry['title']} — S{season}"
-    ICON_PALETTE = entry.get("icon_palettes", {}).get(season, entry.get("default_icon_palette", "original"))
+    ICON_PALETTE = entry.get("icon_palette", "original")
     pattern_str = entry.get("title_patterns", {}).get(season)
     TITLE_PATTERN = re.compile(pattern_str) if pattern_str else None
     LOCAL_FEED_PATHS = entry.get("local_feed_paths", {}).get(season, [])
@@ -618,7 +618,7 @@ def main():
 
     if args.list_podcasts:
         for name, entry in sorted(config.items()):
-            seasons = sorted(entry.get("icon_palettes", {}).keys()) or ["(any, uses default_icon_palette)"]
+            seasons = sorted(entry.get("local_feed_paths", {}).keys()) or ["(any)"]
             print(f"  {name:10s} {entry['title']!r} -- configured seasons: {seasons}")
         return
 
