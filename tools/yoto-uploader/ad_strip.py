@@ -305,8 +305,26 @@ def find_cut_ranges(path_a: str, path_b: str, duration_a: float) -> list[tuple[f
 # episode: the header's nominal-bitrate estimate was 2589.5s vs the file's
 # real ffprobe duration of 2587.7s (~0.07% off, typical container-overhead
 # scale), self-calibrated conversion removes that residual entirely.
+#
+# One more real gotcha, found from a user report of ~3s of ad surviving at
+# the very start of an episode: an ad *slot* existing doesn't mean it got
+# sold. An unfilled pre-roll slot shows up as one or more zero-length
+# placeholder segments (e.g. "pre#1" through "pre#3" all with start==end),
+# sitting a few KB into the file -- and the bytes BEFORE those placeholders
+# (a network bumper/ID, not part of the episode) are never referenced by
+# any segment at all, so cutting only real (end > start) segments leaves
+# that unlabeled prefix untouched. Fix: for the "pre" kind specifically,
+# treat byte 0 as part of the slot too, regardless of where its own
+# segments start -- the show's real content always comes AFTER the
+# pre-roll slot in Megaphone's own accounting (as the gap between "pre"
+# and "mid"), never inside it, so nothing legitimate is ever at risk here.
 
 MEGAPHONE_AD_KINDS = ("pre", "mid", "post")
+MEGAPHONE_MIN_CUT_S = 0.5  # deliberately much smaller than dynamic mode's MIN_CUT_S: that 3.0s
+                           # exists to filter fingerprint-alignment NOISE, which this method has
+                           # none of -- these byte offsets are exact, not inferred, so even a
+                           # short slot (confirmed: a real ~3s unfilled pre-roll bumper) should
+                           # still go if the user doesn't want it.
 
 
 def parse_megaphone_cut_ranges(payload2: str, actual_size: int, actual_duration: float,
@@ -321,7 +339,8 @@ def parse_megaphone_cut_ranges(payload2: str, actual_size: int, actual_duration:
         return []
     bytes_per_sec = actual_size / max(actual_duration, 0.001)
     body = payload2.rsplit("@", 1)[0]
-    cuts = []
+
+    segments = []  # (kind, lo, hi) in header order (== byte order, per every example seen)
     for seg in body.split(","):
         fields = seg.split("#")
         if len(fields) < 5:
@@ -333,9 +352,45 @@ def parse_megaphone_cut_ranges(payload2: str, actual_size: int, actual_duration:
             start_b, end_b = int(start_b), int(end_b)
         except ValueError:
             continue
-        if end_b <= start_b:
-            continue
-        cuts.append((start_b / bytes_per_sec, end_b / bytes_per_sec))
+        segments.append((kind, min(start_b, end_b), max(start_b, end_b)))
+    if not segments:
+        return []
+
+    # Merge only CONSECUTIVE same-kind segments that are contiguous in the byte
+    # stream (this one's start touching the previous one's end) into a single
+    # ad-break span -- e.g. a mid-roll break is often several back-to-back
+    # sub-segments. A byte gap between segments of the same kind (or a kind
+    # change) means a genuinely separate break -- e.g. two distinct mid-roll
+    # pods with real show content between them -- and must NOT be merged: an
+    # earlier version of this grouped by kind alone and briefly turned two
+    # separate ~30-130s mid-roll pods into one ~680s cut that swallowed ~8
+    # minutes of real content sitting between them.
+    groups: list[list] = []  # [kind, lo, hi]
+    for kind, lo, hi in segments:
+        # Adjacent segments' boundaries are "end of one, (end + 1) of the
+        # next" in every example seen -- a small tolerance (not exact
+        # equality) is needed to treat them as touching.
+        if groups and groups[-1][0] == kind and lo <= groups[-1][2] + 8:
+            groups[-1][2] = max(groups[-1][2], hi)
+        else:
+            groups.append([kind, lo, hi])
+
+    # The unlabeled bumper before an unfilled/empty pre-roll slot's own
+    # segments (and, symmetrically, after a post-roll slot's) isn't referenced
+    # by any segment at all -- extend the very first group down to byte 0 if
+    # it's "pre", and the very last group up to the file's actual size if it's
+    # "post" (see module docstring above for how this was found).
+    if groups[0][0] == "pre":
+        groups[0][1] = 0
+    if groups[-1][0] == "post":
+        groups[-1][2] = max(groups[-1][2], actual_size)
+
+    cuts = []
+    for _kind, lo, hi in groups:
+        t0, t1 = lo / bytes_per_sec, hi / bytes_per_sec
+        if t1 - t0 < MEGAPHONE_MIN_CUT_S:
+            continue  # an all-placeholder slot collapses to a near-zero span -- not worth an edit
+        cuts.append((t0, t1))
     return cuts
 
 
