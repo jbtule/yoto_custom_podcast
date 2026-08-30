@@ -96,22 +96,35 @@ for correct duration and audio. Falls back to plain `aac` automatically
 on platforms without it (`require_ffmpeg()` detects this once at
 startup).
 
-## Ad removal (Megaphone shows only)
+## Ad removal
 
-Set `strip_ads: true` on a podcast in `podcasts.yaml` for shows served
-through Megaphone's dynamic ad insertion (confirmed for Stinky Dragon:
-re-downloading the same episode twice gave two different durations,
-since Megaphone stitches a different ad into each request). For those
-shows, each episode is downloaded *twice* and the two copies are diffed
-(`ad_strip.py`) to find and cut whatever audio is unique to one copy --
-real show content is identical between downloads, so anything that
-isn't is presumed to be an ad. See `ad_strip.py`'s module docstring for
-how the diffing works and its real limitations (only catches mid-roll-
-style ads confidently bounded on both sides; won't catch an ad that
-happens to be identical between both downloads; roughly doubles
-download time per episode it's set on). If the two downloads don't
-align confidently enough to trust a cut, it falls back to the full,
-unedited audio rather than guessing.
+Set `strip_ads` on a podcast in `podcasts.yaml` to `dynamic` or
+`leading` depending on how that show's ads are delivered -- both are
+implemented in `ad_strip.py`, which has the full story on how each one
+works and its real limitations; short version:
+
+- **`dynamic`** -- for shows with server-side dynamic ad insertion:
+  every download gets a different ad stitched in (confirmed for Stinky
+  Dragon, served through Megaphone: re-downloading the same episode
+  twice gave two different durations). Each episode is downloaded
+  *twice* and the two copies are diffed to find and cut whatever audio
+  is unique to one copy -- real show content is identical between
+  downloads, so anything that isn't is presumed to be an ad. Only
+  catches mid-roll-style ads confidently bounded on both sides; won't
+  catch an ad that happens to be identical between both downloads;
+  roughly doubles download time per episode.
+- **`leading`** -- for shows whose audio is static per URL (two
+  downloads are byte-identical -- no dynamic insertion to diff against)
+  but which open with a consistent intro jingle in front of a pre-roll
+  ad slot that varies episode to episode (confirmed for Tales of Bob,
+  also served through Megaphone but without dynamic insertion enabled).
+  The jingle is derived once per run from two reference episodes, then
+  every episode is checked for where that jingle starts and everything
+  before it is cut. One download per episode. Only handles ads strictly
+  before the jingle -- a mid-roll or post-jingle ad isn't touched.
+
+Both modes fall back to the full, unedited audio rather than guessing
+when they can't align confidently enough to trust a cut.
 
 ## Icons
 

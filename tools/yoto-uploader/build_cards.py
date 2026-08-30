@@ -87,7 +87,7 @@ FEED_URL: str = ""
 SEASON: int = 0
 CARD_TITLE_PREFIX: str = ""
 ICON_PALETTE: str = "original"
-STRIP_ADS: bool = False
+STRIP_ADS: str | None = None  # None, "dynamic", or "leading" -- see ad_strip.py
 TITLE_PATTERN: re.Pattern | None = None
 LOCAL_FEED_PATHS: list[str] = []
 WORK_DIR: str = ""
@@ -110,7 +110,9 @@ def configure_for_podcast(short_name: str, season: int, config: dict):
     SEASON = season
     CARD_TITLE_PREFIX = f"{entry['title']} — S{season}"
     ICON_PALETTE = entry.get("icon_palette", "original")
-    STRIP_ADS = entry.get("strip_ads", False)
+    STRIP_ADS = entry.get("strip_ads") or None
+    if STRIP_ADS not in (None, "dynamic", "leading"):
+        raise SystemExit(f"{short_name}: strip_ads must be 'dynamic', 'leading', or unset, got {STRIP_ADS!r}")
     pattern_str = entry.get("title_patterns", {}).get(season)
     TITLE_PATTERN = re.compile(pattern_str) if pattern_str else None
     LOCAL_FEED_PATHS = entry.get("local_feed_paths", {}).get(season, [])
@@ -369,14 +371,13 @@ def download(url: str, dest: str, label: str = ""):
     os.remove(raw_tmp)
 
 
-def download_with_ad_strip(url: str, dest: str, label: str = ""):
-    """Like download(), but for shows known to be served through
-    Megaphone's dynamic ad insertion: fetches TWO independent copies of
-    the same episode, diffs them (ad_strip.py) to find ad breaks unique
-    to one copy, and encodes the ad-stripped result to dest. Falls back
-    to a plain, unmodified encode of copy A if the two downloads don't
-    align confidently enough to trust a cut. No-op if dest already
-    exists."""
+def download_with_dynamic_ad_strip(url: str, dest: str, label: str = ""):
+    """strip_ads: dynamic -- for shows served through Megaphone's dynamic
+    ad insertion. Fetches TWO independent copies of the same episode,
+    diffs them (ad_strip.py) to find ad breaks unique to one copy, and
+    encodes the ad-stripped result to dest. Falls back to a plain,
+    unmodified encode of copy A if the two downloads don't align
+    confidently enough to trust a cut. No-op if dest already exists."""
     if os.path.exists(dest):
         return
     base_no_ext, _ = os.path.splitext(dest)
@@ -401,6 +402,90 @@ def download_with_ad_strip(url: str, dest: str, label: str = ""):
     os.remove(raw_a)
     os.remove(raw_b)
     os.rename(encoding_tmp, dest)
+
+
+# Populated once per run by prepare_leader_template(), for strip_ads: leading.
+LEADER_TEMPLATE: list[tuple] | None = None
+_LEADER_TEMPLATE_ATTEMPTED = False
+
+
+def fetch_head_clip(url: str, dest: str, seconds: float, label: str = ""):
+    """Fetch just the first `seconds` of url, encoded straight to dest --
+    streams+trims+encodes in one ffmpeg pass, so this is much cheaper
+    than a full download for shows where only the opening matters (see
+    prepare_leader_template). No-op if dest already exists."""
+    if os.path.exists(dest):
+        return
+    tmp = dest + ".download-tmp"
+    cmd = [
+        "ffmpeg", "-y", "-v", "error",
+        "-headers", "User-Agent: yoto-custom-podcast-uploader/1.0\r\n",
+        "-i", url, "-t", str(seconds), "-c:a", AAC_ENCODER, "-b:a", "128k", "-vn", "-f", "mp4", tmp,
+    ]
+    print(f"    {label}: fetching head clip...")
+    subprocess.run(cmd, capture_output=True, check=True)
+    os.rename(tmp, dest)
+
+
+def prepare_leader_template(episodes: list[dict]):
+    """strip_ads: leading setup, called once per run before the main
+    per-card loop: fetches short head clips of two reference episodes
+    (first and last in the season -- arbitrary but maximally different,
+    so if the derived span is real content, it isn't real content) and
+    derives the show's recurring leader/jingle from what they share
+    (ad_strip.derive_leader_template). Stores the result in the module-
+    level LEADER_TEMPLATE for download_with_leading_ad_strip to use for
+    every episode. Leaves LEADER_TEMPLATE as None (logging why) if no
+    confident common span is found -- callers must treat that as "can't
+    strip ads for this podcast run", not an error."""
+    global LEADER_TEMPLATE, _LEADER_TEMPLATE_ATTEMPTED
+    if _LEADER_TEMPLATE_ATTEMPTED:
+        return
+    _LEADER_TEMPLATE_ATTEMPTED = True
+
+    if len(episodes) < 2:
+        print("  strip_ads: leading needs at least 2 episodes to derive a leader template; skipping ad-strip.")
+        return
+
+    os.makedirs(WORK_DIR, exist_ok=True)
+    ref_a, ref_b = episodes[0], episodes[-1]
+    path_a = os.path.join(WORK_DIR, "_leader_ref_a.m4a")
+    path_b = os.path.join(WORK_DIR, "_leader_ref_b.m4a")
+    print(f"  Deriving leader template from episodes {ref_a['episode']} and {ref_b['episode']}...")
+    fetch_head_clip(ref_a["audio_url"], path_a, ad_strip.HEAD_WINDOW_S, label=f"leader ref (ep {ref_a['episode']})")
+    fetch_head_clip(ref_b["audio_url"], path_b, ad_strip.HEAD_WINDOW_S, label=f"leader ref (ep {ref_b['episode']})")
+
+    LEADER_TEMPLATE = ad_strip.derive_leader_template([path_a, path_b])
+    if LEADER_TEMPLATE is None:
+        print("  strip_ads: leading found no confident common leader between the reference episodes; "
+              "episodes will be left unedited.")
+    else:
+        print(f"  Leader template: {len(LEADER_TEMPLATE) * ad_strip.HOP_S:.1f}s")
+
+
+def download_with_leading_ad_strip(url: str, dest: str, label: str = ""):
+    """strip_ads: leading -- for shows with a static (non-dynamic) ad
+    slot before a consistent intro jingle. Downloads the episode once,
+    finds where LEADER_TEMPLATE (see prepare_leader_template) starts in
+    its opening minutes, and cuts everything before that. Falls back to
+    a plain, unmodified encode if no template is available or no
+    confident match is found. No-op if dest already exists."""
+    if os.path.exists(dest):
+        return
+    base_no_ext, _ = os.path.splitext(dest)
+    raw_tmp = base_no_ext + ".download-tmp-raw"
+    fetch_raw(url, raw_tmp, label)
+    encoding_tmp = base_no_ext + ".encode-tmp"
+
+    cut_point = ad_strip.find_leader_cut(raw_tmp, LEADER_TEMPLATE) if LEADER_TEMPLATE else None
+    if cut_point is None or cut_point < ad_strip.MIN_CUT_S:
+        encode_to_m4a(raw_tmp, dest, label)
+    else:
+        print(f"    {label}: leader starts at {cut_point:.1f}s -- removing everything before it")
+        duration = ffprobe_duration(raw_tmp)
+        ad_strip.encode_with_cuts(raw_tmp, [(0.0, cut_point)], duration, encoding_tmp, AAC_ENCODER, label=label)
+        os.rename(encoding_tmp, dest)
+    os.remove(raw_tmp)
 
 
 def find_split_point(path: str, duration: float) -> float:
@@ -441,8 +526,10 @@ def prepare_episode_tracks(ep: dict) -> list[dict]:
     base = f"ep{ep['episode']:02d}"
     label = f"Episode {ep['episode']}"
     raw_path = os.path.join(WORK_DIR, base + ".m4a")
-    if STRIP_ADS:
-        download_with_ad_strip(ep["audio_url"], raw_path, label=label)
+    if STRIP_ADS == "dynamic":
+        download_with_dynamic_ad_strip(ep["audio_url"], raw_path, label=label)
+    elif STRIP_ADS == "leading":
+        download_with_leading_ad_strip(ep["audio_url"], raw_path, label=label)
     else:
         download(ep["audio_url"], raw_path, label=label)
     duration = ffprobe_duration(raw_path)
@@ -716,6 +803,8 @@ def main():
         return
 
     require_ffmpeg()
+    if STRIP_ADS == "leading":
+        prepare_leader_template(episodes)
     manifest = load_manifest()
     token = get_access_token(force_login=args.force_login)
     client = YotoClient(token)

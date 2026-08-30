@@ -1,17 +1,40 @@
 """
-Ad-break removal via cross-download audio diffing, for shows served
-through Megaphone's dynamic ad insertion (server-side, per-request ad
-stitching -- confirmed for Tales from the Stinky Dragon by downloading
-the same episode twice and comparing).
+Ad-break removal via audio fingerprinting/alignment. Two independent
+strategies live here, for two different kinds of ad delivery -- pick per
+podcast in podcasts.yaml's strip_ads field:
 
-Why this works: two independent downloads of the *same* episode
-enclosure URL get different ad creative stitched in (different content,
-often different length), but byte-for-byte-equivalent real show audio
-otherwise. So: fingerprint both downloads into a sequence of tokens,
-align them with a chained sequence-diff (same idea as `diff`/`git diff`
-on text, or "seed-and-chain" alignment in bioinformatics), and any span
-that's confidently bounded by matching audio on both sides in one copy
-but *not present at all* in the other copy is an ad -- cut it.
+  strip_ads: dynamic  -- for shows with server-side DYNAMIC ad insertion
+      (confirmed for Tales from the Stinky Dragon, served through
+      Megaphone: downloading the same episode twice gets different ad
+      creative stitched in each time). Detected by diffing two
+      independent downloads of the same episode against EACH OTHER --
+      see find_cut_ranges/encode_with_cuts below.
+
+  strip_ads: leading  -- for shows with a STATIC ad (same content every
+      download, confirmed for Tales of Bob: two downloads of the same
+      episode came back byte-for-byte identical) that sits in front of a
+      consistent intro jingle/leader the show itself repeats every
+      episode. Detected by diffing one episode's opening minutes against
+      a small reference clip of that leader (derived once, from two
+      OTHER episodes, by finding what's common between THEM) -- see
+      derive_leader_template/find_leader_cut below. Only needs one
+      download per episode, since there's nothing dynamic to diff
+      against.
+
+Both strategies share the same fingerprinting and chained-alignment
+machinery (same idea as `diff`/`git diff` on text, or "seed-and-chain"
+alignment in bioinformatics): fingerprint audio into a sequence of
+tokens, align two token sequences, and treat any span that's confidently
+bounded by a real match but absent on the other side as removable.
+
+## strip_ads: dynamic
+
+Two independent downloads of the *same* episode enclosure URL get
+different ad creative stitched in (different content, often different
+length), but byte-for-byte-equivalent real show audio otherwise. So:
+fingerprint both downloads, align them, and any span that's confidently
+bounded by matching audio on both sides in one copy but *not present at
+all* in the other copy is an ad -- cut it.
 
 Concretely: chain matching fingerprint blocks between copy A and copy B
 into long "runs" of consistent time offset. The gaps between runs, *in
@@ -37,7 +60,7 @@ Real limitations, not hypothetical:
   - Needs a second full download of the episode, roughly doubling
     bandwidth/time for episodes this applies to.
 
-Validated by hand:
+Validated by hand (dynamic):
   - A synthetic test (known real content, a fake tone spliced into one
     copy at a known position/length) round-tripped correctly: the
     injected span was found within ~1s of its true bounds, and encoding
@@ -51,6 +74,47 @@ Validated by hand:
     cuts; two different episodes of the same show correctly triggered
     AlignmentTooUncertain (4% coverage) instead of returning nonsense
     cuts.
+
+## strip_ads: leading
+
+Tales of Bob turned out to be a different shape of problem: episode
+audio is STATIC (two downloads of the same URL are byte-identical), so
+there's nothing dynamic to diff -- but the show's own content always
+opens with the same ~15-20s jingle, preceded by a pre-roll ad slot
+that's sometimes empty, sometimes a long-running house ad, sometimes
+something else, at a length that varies per episode. So instead of
+diffing two downloads of one episode, diff a handful of DIFFERENT
+episodes' opening minutes against each other once (derive_leader_template)
+to isolate that jingle as a reusable reference clip, then for every
+episode individually, find where that jingle starts in its own opening
+minutes (find_leader_cut) and cut everything before it. One download
+per episode, no assumption about which episodes have ads or what they
+are.
+
+Real limitations, not hypothetical:
+  - Assumes the show actually has a consistent leading jingle/stinger
+    that recurs verbatim every episode. Shows that cold-open straight
+    into variable content have nothing for this to lock onto -- expect
+    it to correctly find no confident match and cut nothing, per
+    episode, rather than to ever misfire (same coverage-gated design as
+    dynamic mode).
+  - Only handles content strictly BEFORE the jingle. A mid-roll ad, or
+    an ad placed *after* the jingle, isn't touched by this strategy.
+  - The two (or more) episodes used to derive the template need to
+    actually share that jingle uncorrupted in their own opening
+    minutes -- an unlucky reference pick (e.g. two episodes that happen
+    to both be ad-free, so there's nothing but the jingle to diff
+    against, or two that are both ad-full with wildly different ads)
+    still works fine in practice (validated below), but a reference
+    episode with a corrupted/missing intro would weaken the template.
+
+Validated by hand: cross-diffing two arbitrary Tales of Bob episodes
+(Chapter 000 vs Chapter 002) isolated a 17.9s common span as the
+template. Matching that template against all 5 episodes tested
+(Chapters 000-004) found it in every one, at offsets ranging from 0s
+(no ad that fetch) to 30s (a real ~30s pre-roll ad) -- including the two
+episodes NOT used to derive the template, confirming it generalizes
+rather than overfitting to the reference pair.
 """
 from __future__ import annotations
 
@@ -78,19 +142,29 @@ MIN_COVERAGE = 0.6       # require >= this fraction of copy A matched, or refuse
 MIN_CUT_S = 3.0          # ignore gaps shorter than this (not worth an edit, likely just noise)
 MAX_CUT_S = 180.0        # refuse to treat any single gap longer than this as an ad (safety valve)
 
+# strip_ads: leading only
+HEAD_WINDOW_S = 360.0    # only look at each episode's first this-many seconds for the leader
+MIN_TEMPLATE_MATCH_FRAC = 0.6  # a leader match must cover >= this fraction of the template's own
+                                # length, or it's not trusted (same "don't guess" principle as
+                                # dynamic mode's MIN_COVERAGE, just against the template instead
+                                # of the whole episode)
+
 SAMPLE_RATE = 8000
 
 
 class AlignmentTooUncertain(Exception):
-    """Raised when the two downloads don't align confidently enough to
-    trust any cut. Callers should fall back to using one copy uncut."""
+    """Raised when an alignment isn't confident enough to trust a cut --
+    either the two dynamic-mode downloads, or a leading-mode episode
+    against the derived leader template. Callers should fall back to
+    the unmodified/uncut audio rather than risk a bad edit."""
 
 
-def _decode_pcm(path: str) -> np.ndarray:
-    proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", path, "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "-"],
-        capture_output=True, check=True,
-    )
+def _decode_pcm(path: str, max_duration: float | None = None) -> np.ndarray:
+    cmd = ["ffmpeg", "-v", "error"]
+    if max_duration is not None:
+        cmd += ["-t", str(max_duration)]
+    cmd += ["-i", path, "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "-"]
+    proc = subprocess.run(cmd, capture_output=True, check=True)
     return np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32) / 32768.0
 
 
@@ -199,6 +273,64 @@ def find_cut_ranges(path_a: str, path_b: str, duration_a: float) -> list[tuple[f
         if b_gap <= OFFSET_TOL and MIN_CUT_S <= a_gap <= MAX_CUT_S:
             cuts.append((prev_run[1], next_run[0]))
     return cuts
+
+
+# --------------------------------------------------------------------------
+# strip_ads: leading
+# --------------------------------------------------------------------------
+
+def derive_leader_template(head_paths: list[str]) -> list[tuple] | None:
+    """Given two (or more) local audio files -- each just the opening
+    HEAD_WINDOW_S-ish of a DIFFERENT episode of the same show -- find the
+    span they have in common (the show's own recurring intro jingle,
+    wherever it happens to fall in each) and return it as a fingerprint
+    template. Returns None if no confident common span is found (e.g.
+    the reference episodes don't actually share a consistent leader).
+
+    Only the first two paths are used to derive the template; more can
+    be passed in but are currently ignored (kept as a list for the
+    caller's convenience picking references, and in case a future
+    version wants to cross-check against a third)."""
+    if len(head_paths) < 2:
+        return None
+    ta = _fingerprint(_decode_pcm(head_paths[0]))
+    tb = _fingerprint(_decode_pcm(head_paths[1]))
+    if not ta or not tb:
+        return None
+
+    sm = difflib.SequenceMatcher(None, ta, tb, autojunk=False)
+    blocks = [blk for blk in sm.get_matching_blocks() if blk.size > 0]
+    runs = _chain_runs(blocks)
+    if not runs:
+        return None
+
+    best = max(runs, key=lambda r: r[1] - r[0])
+    i0, i1 = int(best[0] / HOP_S), int(best[1] / HOP_S)
+    template = ta[i0:i1]
+    return template or None
+
+
+def find_leader_cut(head_path: str, template: list[tuple]) -> float | None:
+    """Look for `template` (from derive_leader_template) within
+    head_path's own opening HEAD_WINDOW_S seconds. Returns the start
+    time of the match -- i.e. "real content (the leader) starts here,
+    cut everything before it" -- or None if no confident match (leave
+    this episode's audio untouched rather than guess)."""
+    head = _fingerprint(_decode_pcm(head_path, max_duration=HEAD_WINDOW_S))
+    if not head or not template:
+        return None
+
+    sm = difflib.SequenceMatcher(None, head, template, autojunk=False)
+    blocks = [blk for blk in sm.get_matching_blocks() if blk.size > 0]
+    runs = _chain_runs(blocks)
+    if not runs:
+        return None
+
+    best = max(runs, key=lambda r: r[1] - r[0])
+    template_len = len(template) * HOP_S
+    if (best[1] - best[0]) / max(template_len, 1.0) < MIN_TEMPLATE_MATCH_FRAC:
+        return None
+    return best[0]
 
 
 def encode_with_cuts(src: str, cuts: list[tuple[float, float]], duration: float,
