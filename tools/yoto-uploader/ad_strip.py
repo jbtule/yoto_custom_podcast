@@ -276,6 +276,70 @@ def find_cut_ranges(path_a: str, path_b: str, duration_a: float) -> list[tuple[f
 
 
 # --------------------------------------------------------------------------
+# strip_ads: megaphone-header
+# --------------------------------------------------------------------------
+#
+# Discovered while diagnosing why 'dynamic' mode was missing real ads: two
+# downloads of the same Stinky Dragon episode came back completely
+# byte-identical (Megaphone's ad selection is sticky for some window, not
+# freshly randomized per request, so "download twice and diff" doesn't
+# reliably see a different ad) -- but the response headers on that SAME
+# download included `x-megaphone-payload-2`, which turned out to be
+# Megaphone's own exact byte-offset map of every pre/mid/post-roll ad
+# segment in the file. No diffing, no fingerprinting, no guessing: this is
+# ground truth from the ad server itself, on every single download, and it
+# needs only one download per episode. Strictly better than 'dynamic' or
+# 'leading' for any show confirmed to send it (checked: both Stinky Dragon
+# and Tales of Bob do, despite Tales of Bob having no *dynamic* ad
+# insertion -- the header is sent regardless of whether the ad happens to
+# vary between requests).
+#
+# Format (reverse-engineered, undocumented): the header is a comma-
+# separated list of ad segments, each "creativeId#endByte#kind#index#
+# startByte#creativeId2#filled1#filled2" (kind is "pre"/"mid"/"post"; some
+# fields are legitimately empty, e.g. an unfilled slot's creative id), then
+# an '@'-separated tail carrying a show id and a nominal bitrate. Byte
+# offsets are converted to time using the ACTUAL downloaded file's own
+# size/duration (not the header's nominal bitrate) so any constant
+# ID3/container overhead self-calibrates out -- validated against a real
+# episode: the header's nominal-bitrate estimate was 2589.5s vs the file's
+# real ffprobe duration of 2587.7s (~0.07% off, typical container-overhead
+# scale), self-calibrated conversion removes that residual entirely.
+
+MEGAPHONE_AD_KINDS = ("pre", "mid", "post")
+
+
+def parse_megaphone_cut_ranges(payload2: str, actual_size: int, actual_duration: float,
+                                kinds: tuple[str, ...] = MEGAPHONE_AD_KINDS) -> list[tuple[float, float]]:
+    """Parse an x-megaphone-payload-2 header value into (start, end)
+    cut ranges in seconds, using the actual downloaded file's own
+    size/duration to convert Megaphone's byte offsets to time. Returns
+    [] (never raises) on anything unparseable -- callers should treat
+    that exactly like "no ad-break metadata available" and fall back to
+    unedited audio, not as an error."""
+    if not payload2 or "@" not in payload2:
+        return []
+    bytes_per_sec = actual_size / max(actual_duration, 0.001)
+    body = payload2.rsplit("@", 1)[0]
+    cuts = []
+    for seg in body.split(","):
+        fields = seg.split("#")
+        if len(fields) < 5:
+            continue
+        _creative, end_b, kind, _idx, start_b = fields[:5]
+        if kind not in kinds or not start_b or not end_b:
+            continue
+        try:
+            start_b, end_b = int(start_b), int(end_b)
+        except ValueError:
+            continue
+        if end_b <= start_b:
+            continue
+        cuts.append((start_b / bytes_per_sec, end_b / bytes_per_sec))
+    return cuts
+
+
+# --------------------------------------------------------------------------
 # strip_ads: leading
 # --------------------------------------------------------------------------
 

@@ -111,8 +111,9 @@ def configure_for_podcast(short_name: str, season: int, config: dict):
     CARD_TITLE_PREFIX = f"{entry['title']} — S{season}"
     ICON_PALETTE = entry.get("icon_palette", "original")
     STRIP_ADS = entry.get("strip_ads") or None
-    if STRIP_ADS not in (None, "dynamic", "leading"):
-        raise SystemExit(f"{short_name}: strip_ads must be 'dynamic', 'leading', or unset, got {STRIP_ADS!r}")
+    if STRIP_ADS not in (None, "dynamic", "leading", "megaphone-header"):
+        raise SystemExit(f"{short_name}: strip_ads must be 'megaphone-header', 'dynamic', 'leading', "
+                          f"or unset, got {STRIP_ADS!r}")
     pattern_str = entry.get("title_patterns", {}).get(season)
     TITLE_PATTERN = re.compile(pattern_str) if pattern_str else None
     LOCAL_FEED_PATHS = entry.get("local_feed_paths", {}).get(season, [])
@@ -333,6 +334,23 @@ def fetch_raw(url: str, dest: str, label: str = ""):
     os.rename(tmp, dest)
 
 
+def fetch_raw_with_headers(url: str, dest: str, label: str = ""):
+    """Like fetch_raw, but also returns the HTTP response headers from
+    the download (urlretrieve already captures these; fetch_raw just
+    doesn't expose them) -- needed for strip_ads: megaphone-header,
+    where the ad-break locations come from a response header on this
+    same download, not a second request. Returns None (doing nothing
+    else) if dest already exists, since there's no download to read
+    headers from in that case."""
+    if os.path.exists(dest):
+        return None
+    tmp = dest + ".download-tmp"
+    _, headers = urllib.request.urlretrieve(url, tmp, reporthook=_download_progress_hook(label))
+    print(" " * 60, end="\r")
+    os.rename(tmp, dest)
+    return headers
+
+
 def encode_to_m4a(src: str, dest: str, label: str = ""):
     """Re-encode src (any ffmpeg-readable local audio file) to AAC/M4A at
     dest. No-op if dest already exists.
@@ -402,6 +420,42 @@ def download_with_dynamic_ad_strip(url: str, dest: str, label: str = ""):
     os.remove(raw_a)
     os.remove(raw_b)
     os.rename(encoding_tmp, dest)
+
+
+def download_with_megaphone_header_strip(url: str, dest: str, label: str = ""):
+    """strip_ads: megaphone-header -- for shows served through Megaphone,
+    which sends an exact byte-offset map of every pre/mid/post-roll ad
+    segment in the x-megaphone-payload-2 response header on every
+    single download (see ad_strip.py's megaphone-header section for the
+    full story on how this was found and the header format). Needs only
+    ONE download -- no diffing, no fingerprinting -- and is byte-precise
+    rather than probabilistic, so prefer this over 'dynamic'/'leading'
+    for any show confirmed to send the header. Falls back to a plain,
+    unedited encode if the header is missing or has nothing to cut. No-
+    op if dest already exists."""
+    if os.path.exists(dest):
+        return
+    base_no_ext, _ = os.path.splitext(dest)
+    raw_tmp = base_no_ext + ".download-tmp-raw"
+    headers = fetch_raw_with_headers(url, raw_tmp, label)
+    duration = ffprobe_duration(raw_tmp)
+
+    cuts = []
+    payload2 = headers.get("x-megaphone-payload-2") if headers else None
+    if payload2:
+        cuts = ad_strip.parse_megaphone_cut_ranges(payload2, os.path.getsize(raw_tmp), duration)
+    else:
+        print(f"    {label}: no Megaphone ad-break header on this download; keeping full audio, unedited")
+
+    if cuts:
+        total = sum(e - s for s, e in cuts)
+        print(f"    {label}: found {len(cuts)} Megaphone-labeled ad segment(s) totaling {total:.0f}s -- removing")
+        encoding_tmp = base_no_ext + ".encode-tmp"
+        ad_strip.encode_with_cuts(raw_tmp, cuts, duration, encoding_tmp, AAC_ENCODER, label=label)
+        os.rename(encoding_tmp, dest)
+    else:
+        encode_to_m4a(raw_tmp, dest, label)
+    os.remove(raw_tmp)
 
 
 # Populated once per run by prepare_leader_template(), for strip_ads: leading.
@@ -526,7 +580,9 @@ def prepare_episode_tracks(ep: dict) -> list[dict]:
     base = f"ep{ep['episode']:02d}"
     label = f"Episode {ep['episode']}"
     raw_path = os.path.join(WORK_DIR, base + ".m4a")
-    if STRIP_ADS == "dynamic":
+    if STRIP_ADS == "megaphone-header":
+        download_with_megaphone_header_strip(ep["audio_url"], raw_path, label=label)
+    elif STRIP_ADS == "dynamic":
         download_with_dynamic_ad_strip(ep["audio_url"], raw_path, label=label)
     elif STRIP_ADS == "leading":
         download_with_leading_ad_strip(ep["audio_url"], raw_path, label=label)
