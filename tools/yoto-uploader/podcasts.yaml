@@ -19,6 +19,13 @@
 #                       from each other, while different podcasts read
 #                       as distinct via their own palette. Defaults to
 #                       "original" if omitted.
+#   strip_ads          Optional, default false. For shows served through
+#                       Megaphone's dynamic ad insertion ONLY -- downloads
+#                       each episode twice and diffs the copies to find
+#                       and cut whatever audio is unique to one copy (see
+#                       ad_strip.py's docstring for how/why and its real
+#                       limitations). Roughly doubles download time per
+#                       episode for shows it's set on.
 #   title_patterns      Optional. Maps season number -> a regex (one
 #                       capture group = episode number) matched against
 #                       episode titles, used INSTEAD of the feed's
@@ -113,6 +120,16 @@ stinky-dragon:
   title: "Tales from the Stinky Dragon"
   feed_url: "https://feeds.megaphone.fm/stinkydragon"
   icon_palette: rainbow
+  # Megaphone dynamically stitches a different ad into each request for
+  # the same episode URL (confirmed: re-downloading one episode gave two
+  # different durations). strip_ads uses that against itself -- it
+  # downloads each episode twice and diffs the two copies (ad_strip.py)
+  # to find and cut whatever's unique to one copy. See ad_strip.py's
+  # docstring for how it works and its real limitations (roughly doubles
+  # download time per episode; only catches mid-roll-style ads bounded
+  # by a confident match on both sides; won't catch an ad that happens
+  # to be identical between both downloads).
+  strip_ads: true
   # "Season 1"/"Season 2" here mean Campaign 1 and Campaign 2 (86 + 50
   # episodes, both complete) -- this feed's season tags mislabel a
   # post-finale bonus mini-arc as part of Campaign 1's numbering and

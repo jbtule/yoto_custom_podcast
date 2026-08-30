@@ -54,6 +54,7 @@ import xml.etree.ElementTree as ET
 import yaml
 from PIL import Image
 
+import ad_strip
 from icon_gen import apply_cover_badge, pad_to_safe_portrait, save_icon
 from yoto_auth import get_access_token
 from yoto_client import YotoClient
@@ -86,6 +87,7 @@ FEED_URL: str = ""
 SEASON: int = 0
 CARD_TITLE_PREFIX: str = ""
 ICON_PALETTE: str = "original"
+STRIP_ADS: bool = False
 TITLE_PATTERN: re.Pattern | None = None
 LOCAL_FEED_PATHS: list[str] = []
 WORK_DIR: str = ""
@@ -100,7 +102,7 @@ def load_podcasts_config() -> dict:
 
 def configure_for_podcast(short_name: str, season: int, config: dict):
     """Set the module-level config globals for the selected podcast+season."""
-    global FEED_URL, SEASON, CARD_TITLE_PREFIX, ICON_PALETTE, TITLE_PATTERN, LOCAL_FEED_PATHS
+    global FEED_URL, SEASON, CARD_TITLE_PREFIX, ICON_PALETTE, STRIP_ADS, TITLE_PATTERN, LOCAL_FEED_PATHS
     global WORK_DIR, MANIFEST_PATH, ICON_DIR, _source_cache
     _source_cache = None
     entry = config[short_name]
@@ -108,6 +110,7 @@ def configure_for_podcast(short_name: str, season: int, config: dict):
     SEASON = season
     CARD_TITLE_PREFIX = f"{entry['title']} — S{season}"
     ICON_PALETTE = entry.get("icon_palette", "original")
+    STRIP_ADS = entry.get("strip_ads", False)
     pattern_str = entry.get("title_patterns", {}).get(season)
     TITLE_PATTERN = re.compile(pattern_str) if pattern_str else None
     LOCAL_FEED_PATHS = entry.get("local_feed_paths", {}).get(season, [])
@@ -315,33 +318,88 @@ def _run_ffmpeg_with_progress(cmd: list[str], total_duration: float, label: str,
         raise subprocess.CalledProcessError(proc.returncode, cmd, output="".join(stderr_lines))
 
 
-def download(url: str, dest: str, label: str = ""):
+def fetch_raw(url: str, dest: str, label: str = ""):
+    """Download url to dest verbatim, no encoding. No-op if dest already
+    exists -- callers that need a genuinely fresh copy (e.g. ad_strip's
+    two independent downloads of the same URL) must pass a dest that
+    doesn't exist yet."""
     if os.path.exists(dest):
         return
-    # Temp filenames avoid sandwiching the real ".m4a" extension in the
-    # middle (e.g. NOT "ep12.m4a.part") -- "ep12.download-tmp" reads more
-    # clearly as "not a finished file yet" than "ep12.m4a.part" does.
-    base_no_ext, _ = os.path.splitext(dest)
-    downloading_tmp = base_no_ext + ".download-tmp"
-    encoding_tmp = base_no_ext + ".encode-tmp"
-
-    urllib.request.urlretrieve(url, downloading_tmp, reporthook=_download_progress_hook(label))
+    tmp = dest + ".download-tmp"
+    urllib.request.urlretrieve(url, tmp, reporthook=_download_progress_hook(label))
     print(" " * 60, end="\r")
-    # Source mp3s often carry an embedded cover-art image as a second
-    # (video) stream alongside the audio, and Yoto's own MP3 ingest
-    # pipeline turned out to be unreliable for us regardless of how
-    # carefully the mp3 was re-encoded (VBR headers, ID3 size, etc. all
-    # checked out fine locally, but standalone-upload tests through the
-    # official Yoto app still played a few seconds then cut off/crashed).
-    # Confirmed via direct A/B test that the same audio re-encoded as
-    # M4A/AAC uploads and plays correctly, so we convert straight to M4A
-    # here rather than staying on MP3 at all.
-    raw_duration = ffprobe_duration(downloading_tmp)
+    os.rename(tmp, dest)
+
+
+def encode_to_m4a(src: str, dest: str, label: str = ""):
+    """Re-encode src (any ffmpeg-readable local audio file) to AAC/M4A at
+    dest. No-op if dest already exists.
+
+    Source mp3s often carry an embedded cover-art image as a second
+    (video) stream alongside the audio, and Yoto's own MP3 ingest
+    pipeline turned out to be unreliable for us regardless of how
+    carefully the mp3 was re-encoded (VBR headers, ID3 size, etc. all
+    checked out fine locally, but standalone-upload tests through the
+    official Yoto app still played a few seconds then cut off/crashed).
+    Confirmed via direct A/B test that the same audio re-encoded as
+    M4A/AAC uploads and plays correctly, so we convert straight to M4A
+    here rather than staying on MP3 at all.
+    """
+    if os.path.exists(dest):
+        return
+    base_no_ext, _ = os.path.splitext(dest)
+    encoding_tmp = base_no_ext + ".encode-tmp"
+    raw_duration = ffprobe_duration(src)
     _run_ffmpeg_with_progress(
-        ["ffmpeg", "-y", "-i", downloading_tmp, "-map", "0:a:0", "-c:a", AAC_ENCODER, "-b:a", "128k", "-vn", "-f", "mp4", encoding_tmp],
+        ["ffmpeg", "-y", "-i", src, "-map", "0:a:0", "-c:a", AAC_ENCODER, "-b:a", "128k", "-vn", "-f", "mp4", encoding_tmp],
         raw_duration, label, "encoding",
     )
-    os.remove(downloading_tmp)
+    os.rename(encoding_tmp, dest)
+
+
+def download(url: str, dest: str, label: str = ""):
+    """One-shot fetch + encode + clean up the raw copy. No-op if dest
+    already exists."""
+    if os.path.exists(dest):
+        return
+    base_no_ext, _ = os.path.splitext(dest)
+    raw_tmp = base_no_ext + ".download-tmp-raw"
+    fetch_raw(url, raw_tmp, label)
+    encode_to_m4a(raw_tmp, dest, label)
+    os.remove(raw_tmp)
+
+
+def download_with_ad_strip(url: str, dest: str, label: str = ""):
+    """Like download(), but for shows known to be served through
+    Megaphone's dynamic ad insertion: fetches TWO independent copies of
+    the same episode, diffs them (ad_strip.py) to find ad breaks unique
+    to one copy, and encodes the ad-stripped result to dest. Falls back
+    to a plain, unmodified encode of copy A if the two downloads don't
+    align confidently enough to trust a cut. No-op if dest already
+    exists."""
+    if os.path.exists(dest):
+        return
+    base_no_ext, _ = os.path.splitext(dest)
+    raw_a = base_no_ext + ".dlA-tmp"
+    raw_b = base_no_ext + ".dlB-tmp"
+    fetch_raw(url, raw_a, label=f"{label} (copy A)")
+    fetch_raw(url, raw_b, label=f"{label} (copy B)")
+    duration_a = ffprobe_duration(raw_a)
+
+    try:
+        cuts = ad_strip.find_cut_ranges(raw_a, raw_b, duration_a)
+    except ad_strip.AlignmentTooUncertain as exc:
+        print(f"    {label}: ad-strip alignment uncertain ({exc}); keeping full audio, unedited")
+        cuts = []
+
+    if cuts:
+        total = sum(e - s for s, e in cuts)
+        print(f"    {label}: found {len(cuts)} ad break(s) totaling {total:.0f}s -- removing")
+
+    encoding_tmp = base_no_ext + ".encode-tmp"
+    ad_strip.encode_with_cuts(raw_a, cuts, duration_a, encoding_tmp, AAC_ENCODER, label=label)
+    os.remove(raw_a)
+    os.remove(raw_b)
     os.rename(encoding_tmp, dest)
 
 
@@ -383,7 +441,10 @@ def prepare_episode_tracks(ep: dict) -> list[dict]:
     base = f"ep{ep['episode']:02d}"
     label = f"Episode {ep['episode']}"
     raw_path = os.path.join(WORK_DIR, base + ".m4a")
-    download(ep["audio_url"], raw_path, label=label)
+    if STRIP_ADS:
+        download_with_ad_strip(ep["audio_url"], raw_path, label=label)
+    else:
+        download(ep["audio_url"], raw_path, label=label)
     duration = ffprobe_duration(raw_path)
 
     if duration <= SPLIT_THRESHOLD_SEC:
