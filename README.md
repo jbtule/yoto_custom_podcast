@@ -22,6 +22,9 @@ Each podcast gets its own folder under `podcasts/`.
 - [`podcasts/tales-of-bob`](podcasts/tales-of-bob) — *Tales of Bob*'s
   "Broken Tusk Rising" campaign (93 chapters), split into four feeds,
   side-content/one-shots excluded, in correct chapter order.
+  ⚠️ **contains ads** — the source audio has real ads in it and these
+  feeds don't touch the audio at all, so they play through unedited (see
+  the podcast's own README).
 - [`podcasts/sneak-attack`](podcasts/sneak-attack) — *Sneak Attack!*,
   Season 1 (156 episodes), split into seven feeds, story episodes only,
   in correct season order.
@@ -33,6 +36,9 @@ Each podcast gets its own folder under `podcasts/`.
   Stinky Dragon*, Campaigns 1 & 2 (86 + 50 episodes, both complete),
   split into six feeds, interludes/bonus/one-shots and the ongoing
   Campaign 3 excluded, in correct episode order.
+  ⚠️ **contains ads** — the source audio has real ads in it and these
+  feeds don't touch the audio at all, so they play through unedited (see
+  the podcast's own README).
 
 ## Layout convention
 

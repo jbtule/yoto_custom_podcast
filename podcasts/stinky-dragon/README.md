@@ -53,6 +53,22 @@ sorts newest-first, playback comes out in correct episode order (Episode
 files, titles, and descriptions are untouched — pulled straight from the
 source feed.
 
+## ⚠️ Ads
+
+These feeds only reorder/filter which *episodes* play and in what order
+-- they don't touch the audio itself. The source audio (served through
+Megaphone) has real ads baked into it: pre-roll, mid-roll, and post-roll
+spots, confirmed via Megaphone's own `x-megaphone-payload-2` response
+header (an exact byte-offset map of every ad segment). A custom-RSS card
+built from these feeds will play those ads unedited.
+
+If that matters to you (e.g. this is going on a kid's player), use
+[`tools/yoto-uploader/`](../../tools/yoto-uploader/) instead, with
+`strip_ads: megaphone-header` set for this show (already configured in
+its `podcasts.yaml` entry) -- it downloads each episode, reads that same
+header, and cuts every ad segment out before uploading real MYO cards.
+There's no equivalent ad-stripping for the plain RSS-feed approach.
+
 ## Use with Yoto
 
 Add one custom RSS card per feed in the Yoto app/console, using its raw URL:
