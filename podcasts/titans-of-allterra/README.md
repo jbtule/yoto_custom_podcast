@@ -10,7 +10,9 @@ Custom RSS feeds for loading *The Titans of All'Terra* onto a
 - The show's real feed mixes story episodes with bonus tracks (cast intros,
   "autopsy" recap episodes, Kickstarter plugs, etc).
 - Season 1 has **36** story episodes and Season 2 has **26** — both over
-  Yoto's 25-track limit.
+  Yoto's 25-track limit. Season 3 is ongoing and currently has **10**
+  episodes (fits in a single feed for now; re-run the script and add a
+  Part 2 once it passes 25).
 
 To work around this, this folder publishes trimmed, reordered feeds, split
 per season into parts that each fit under the limit:
@@ -21,6 +23,7 @@ per season into parts that each fit under the limit:
 | Season 1, Part 2 | 19–36 | [`feeds/season1-part2.xml`](feeds/season1-part2.xml) |
 | Season 2, Part 1 | 1–13 | [`feeds/season2-part1.xml`](feeds/season2-part1.xml) |
 | Season 2, Part 2 | 14–26 | [`feeds/season2-part2.xml`](feeds/season2-part2.xml) |
+| Season 3, Part 1 | 1–10 | [`feeds/season3-part1.xml`](feeds/season3-part1.xml) |
 
 Each feed contains only "full" story episodes (no bonus/trailer tracks) and
 has fake, evenly-spaced `pubDate`s assigned in *reverse* order, so that when
@@ -51,6 +54,11 @@ https://raw.githubusercontent.com/jbtule/yoto_custom_podcast/main/podcasts/titan
 Season 2, Part 2 (Episodes 14–26):
 ```
 https://raw.githubusercontent.com/jbtule/yoto_custom_podcast/main/podcasts/titans-of-allterra/feeds/season2-part2.xml
+```
+
+Season 3, Part 1 (Episodes 1–10):
+```
+https://raw.githubusercontent.com/jbtule/yoto_custom_podcast/main/podcasts/titans-of-allterra/feeds/season3-part1.xml
 ```
 
 ## Rebuilding the feeds

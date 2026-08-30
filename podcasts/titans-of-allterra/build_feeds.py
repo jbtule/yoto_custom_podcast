@@ -57,6 +57,9 @@ SEASONS: dict[int, list[tuple[str, str, int, int]]] = {
         ("season2-part1.xml", "Season 2, Part 1 (Episodes 1-13)", 1, 13),
         ("season2-part2.xml", "Season 2, Part 2 (Episodes 14-26)", 14, 26),
     ],
+    3: [
+        ("season3-part1.xml", "Season 3, Part 1 (Episodes 1-10)", 1, 10),
+    ],
 }
 
 RFC2822 = "%a, %d %b %Y %H:%M:%S +0000"

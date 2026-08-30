@@ -59,6 +59,8 @@ titans:
     2:
       - "podcasts/titans-of-allterra/feeds/season2-part1.xml"
       - "podcasts/titans-of-allterra/feeds/season2-part2.xml"
+    3:
+      - "podcasts/titans-of-allterra/feeds/season3-part1.xml"
 
 tales-of-bob:
   title: "Tales of Bob"

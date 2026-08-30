@@ -17,8 +17,8 @@ Each podcast gets its own folder under `podcasts/`.
 ## Podcasts
 
 - [`podcasts/titans-of-allterra`](podcasts/titans-of-allterra) — *The Titans
-  of All'Terra*, Seasons 1 & 2, each split into two feeds, story episodes
-  only, in correct season order.
+  of All'Terra*, Seasons 1 & 2 (each split into two feeds) and Season 3
+  (ongoing, one feed so far), story episodes only, in correct season order.
 - [`podcasts/tales-of-bob`](podcasts/tales-of-bob) — *Tales of Bob*'s
   "Broken Tusk Rising" campaign (93 chapters), split into four feeds,
   side-content/one-shots excluded, in correct chapter order.
