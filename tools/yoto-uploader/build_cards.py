@@ -60,6 +60,15 @@ from yoto_client import YotoClient
 
 NS = {"itunes": "http://www.itunes.com/dtds/podcast-1.0.dtd"}
 
+# Some podcast-tracking redirect chains (podtrac, megaphone, etc.) 403 the
+# stock "Python-urllib/x.y" User-Agent specifically, but accept literally
+# any other one -- so install a global opener that sends a normal-looking
+# UA on every urllib.request call in this file (feed fetch, audio
+# download, cover art fetch).
+_opener = urllib.request.build_opener()
+_opener.addheaders = [("User-Agent", "yoto-custom-podcast-uploader/1.0")]
+urllib.request.install_opener(_opener)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))  # tools/yoto-uploader -> repo root
 STATE_DIR = os.path.join(HERE, ".state")
