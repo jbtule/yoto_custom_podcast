@@ -807,6 +807,33 @@ def build_card_content(card_index: int, episodes: list[dict], local_tracks_by_ep
     return payload
 
 
+def parse_card_selector(spec: str) -> set[int]:
+    """Parse a --only-card value like "3", "3-5", or "1,3-5,8" into a set
+    of 1-based card numbers."""
+    cards = set()
+    for chunk in spec.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "-" in chunk:
+            start_s, _, end_s = chunk.partition("-")
+            try:
+                start, end = int(start_s), int(end_s)
+            except ValueError:
+                raise argparse.ArgumentTypeError(f"invalid card range: {chunk!r}")
+            if start > end:
+                raise argparse.ArgumentTypeError(f"invalid card range: {chunk!r} (start > end)")
+            cards.update(range(start, end + 1))
+        else:
+            try:
+                cards.add(int(chunk))
+            except ValueError:
+                raise argparse.ArgumentTypeError(f"invalid card number: {chunk!r}")
+    if not cards:
+        raise argparse.ArgumentTypeError(f"no card numbers found in: {spec!r}")
+    return cards
+
+
 def main():
     config = load_podcasts_config()
 
@@ -818,7 +845,9 @@ def main():
                          help="List configured podcasts from podcasts.yaml and exit.")
     parser.add_argument("--dry-run", action="store_true", help="Print the card plan and exit; no downloads/uploads.")
     parser.add_argument("--force-login", action="store_true", help="Ignore any cached Yoto session and log in again.")
-    parser.add_argument("--only-card", type=int, help="Only process this card number (1-based).")
+    parser.add_argument("--only-card", type=parse_card_selector,
+                         help="Only process these card number(s) (1-based). Accepts a single number "
+                              "(3), a range (3-5), or a comma-separated mix of both (1,3-5,8).")
     parser.add_argument("--force-recreate", action="store_true",
                          help="Re-run an already-created card (e.g. --only-card 3), updating it in "
                               "place via its existing cardId instead of skipping or duplicating it.")
@@ -874,7 +903,7 @@ def main():
     manifest.setdefault("cover_urls", {})
 
     for i, card in enumerate(cards, start=1):
-        if args.only_card and i != args.only_card:
+        if args.only_card and i not in args.only_card:
             continue
         card_key = f"{i}-new" if args.as_new_card else str(i)
         existing_card_id = None if args.as_new_card else manifest["cards"].get(card_key, {}).get("cardId")
