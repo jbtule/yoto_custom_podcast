@@ -148,12 +148,39 @@ def _draw_line(pixels, letter: str, num: int, y: int, color: tuple[int, int, int
     _draw_char(pixels, digits[1], 11, y, color)
 
 
-def _draw_season_card_line(pixels, season: int, card_num: int, y: int, color: tuple[int, int, int, int]):
-    """Draw "S<season>.<card>" as 4 glyphs: S, one digit, ., one digit.
-    Assumes single-digit season/card numbers (fits 4 glyphs in 16px)."""
-    chars = ["S", str(season % 10), ".", str(card_num % 10)]
+def _draw_season_card_line(pixels, season: int, card_num: int, y: int, color: tuple[int, int, int, int],
+                            compact: bool = True):
+    """Draw "S<season>.<card>" as pixel-font glyphs, 4px apart.
+
+    compact=True (the 16x16 on-device track icon -- a hard 16px width
+    limit that only fits 4 glyphs): single-digit season/card via modulo,
+    same as always.
+    compact=False (the cover-art badge -- rendered into a buffer that's
+    scaled up afterward, so width isn't hardware-constrained): full
+    season/card digits, however many, so e.g. card 10 doesn't draw
+    identically to card 0/card 1's "S1.0"/"S1.1".
+    """
+    if compact:
+        chars = ["S", str(season % 10), ".", str(card_num % 10)]
+    else:
+        chars = ["S", *str(season), ".", *str(card_num)]
     for i, ch in enumerate(chars):
         _draw_char(pixels, ch, i * 4, y, color)
+
+
+def _draw_tens_marks(pixels, tens: int, color: tuple[int, int, int, int]):
+    """One dot per ten in the card number, stacked directly above the
+    S<season>.<card> line's decimal point (x=9, matching the "." glyph
+    drawn at i*4=8 with its lit pixel at column 1, row 4 -> global y=6),
+    in the column's own otherwise-unused rows: 1px space, dot (y=4), 1px
+    space, dot (y=2), 1px space, dot (y=0) -- 3 dots, so up to card 39.
+    The compact on-device icon only has room for a single ones digit (see
+    _draw_season_card_line), so this is how card 13's icon reads
+    differently from card 3's: same "S1.3", plus a dot above the decimal
+    for the ten."""
+    x = 9
+    for i in range(min(tens, 3)):
+        pixels[x, 4 - 2 * i] = color
 
 
 def generate_icon(season: int, card_num: int, episode_num: int, part: int | None = None,
@@ -170,7 +197,10 @@ def generate_icon(season: int, card_num: int, episode_num: int, part: int | None
     img = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
     pixels = img.load()
 
-    _draw_season_card_line(pixels, season, card_num, 2, season_color(palette, season))
+    season_col = season_color(palette, season)
+    _draw_season_card_line(pixels, season, card_num, 2, season_col)
+    if card_num >= 10:
+        _draw_tens_marks(pixels, card_num // 10, season_col)
     _draw_line(pixels, "E", episode_num, 9, (255, 255, 255, 255))
 
     if part == 2:
@@ -189,10 +219,11 @@ def render_badge(season: int, card_num: int, palette: str = DEFAULT_PALETTE, sca
     """Render "S<season>.<card>" as a badge for compositing onto cover
     art: pixel-font text at `scale`x, on a rounded semi-opaque dark chip
     so it stays legible over arbitrary artwork."""
-    text_w, text_h = 15, 5  # matches _draw_season_card_line's 4-glyph layout
+    chars = ["S", *str(season), ".", *str(card_num)]
+    text_w, text_h = len(chars) * 4 - 1, 5
     small = Image.new("RGBA", (text_w, text_h), (0, 0, 0, 0))
     pixels = small.load()
-    _draw_season_card_line(pixels, season, card_num, 0, season_color(palette, season))
+    _draw_season_card_line(pixels, season, card_num, 0, season_color(palette, season), compact=False)
     big_text = small.resize((text_w * scale, text_h * scale), resample=Image.NEAREST)
 
     pad = scale
